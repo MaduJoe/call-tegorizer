@@ -3,19 +3,36 @@ from pathlib import Path
 from config_loader import get_config
 
 class STTProcessor:
-    def __init__(self, model_name=None):
+    def __init__(self, ):
         # config.yaml에서 설정 로드
         config = get_config().get_stt_config()
-        self.model_name = model_name or config.get('model_name', 'medium')
+        self.model_name = config.get('model_name', 'medium')
         self.device = config.get('device', 'cuda')
-        print(self.model_name, self.device)
-        self.model = whisper.load_model(name=self.model_name, device=self.device)
-    
+        self.language = config.get('language', 'Korean')
+        self.fp16 = config.get('fp16', True)
+        self.beam_size = config.get('beam_size', 1)
+        self.best_of = config.get('best_of', 1)
+        self.temperature = config.get('temperature', 0)
+        self.condition_on_previous_text = config.get('condition_on_previous_text', False)
+        self.task = config.get('task', 'transcribe')
+        self.vad_filter = config.get('vad_filter', True)
+        
+        self.model = whisper.load_model(
+            name=self.model_name,
+            device=self.device
+        )
+
     def transcribe(self, audio_path: str) -> dict:
         """화자분리된 단일 파일 변환"""
         result = self.model.transcribe(
             audio_path,
-            language="Korean",
+            language=self.language,
+            fp16=self.fp16,
+            beam_size=self.beam_size,
+            best_of=self.best_of,
+            temperature=self.temperature,
+            condition_on_previous_text=self.condition_on_previous_text,
+            task=self.task,
             verbose=False
         )
         return {

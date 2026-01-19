@@ -6,5 +6,5 @@ logs/
 .env
 CLAUDE.md
 *.wav
-*.flac
+*.wav
 .venv

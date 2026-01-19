@@ -29,7 +29,7 @@ def collect_call_ids(day_folder: Path):
     """특정 날짜 폴더에서 call_id 수집"""
     call_ids = {
         f.stem.rsplit("-", 1)[0]
-        for f in day_folder.glob("*.flac")
+        for f in day_folder.glob("*.wav")
     }
     return {
         "day_folder": day_folder,
@@ -46,8 +46,14 @@ async def process_call(call_info, stt, analyzer, output_path, stt_lock):
     month = call_info["month"]
     day = call_info["day"]
 
-    agent_file = day_folder / f"{call_id}-RX.flac"
-    customer_file = day_folder / f"{call_id}-TX.flac"
+    # 출력 파일이 이미 존재하면 skip
+    output_file = output_path / month / day / f"{call_id}.json"
+    if output_file.exists():
+        print(f"  ⏭ Skipping {call_id} (already processed)")
+        return None
+
+    agent_file = day_folder / f"{call_id}-RX.wav"
+    customer_file = day_folder / f"{call_id}-TX.wav"
 
     if not (agent_file.exists() and customer_file.exists()):
         return None
@@ -73,8 +79,7 @@ async def process_call(call_info, stt, analyzer, output_path, stt_lock):
     # 분석(LLM)은 STT 끝난 뒤 병렬 실행 가능 (여긴 lock 필요 없음)
     analysis = await loop.run_in_executor(
         None,
-        analyzer.summarize,
-        transcript["merged"]
+        lambda: analyzer.summarize(transcript["merged"], call_id)
     )
     llm_end = time.time()
     print(f"    ✓ Analysis completed in {llm_end - llm_start:.2f} seconds")
@@ -99,11 +104,6 @@ async def process_call(call_info, stt, analyzer, output_path, stt_lock):
 
 
 async def process_batch(input_dir: str = None, output_dir: str = None):
-    # config.yaml에서 기본값 로드
-    config = get_config()
-    input_dir = input_dir or config.get('paths.input_dir')
-    output_dir = output_dir or config.get('paths.output_dir')
-
     stt = STTProcessor()  # config.yaml에서 모델 자동 로드
     analyzer = CallAnalyzer()  # config.yaml에서 모델 자동 로드
     stt_lock = asyncio.Lock()
@@ -151,12 +151,27 @@ async def process_batch(input_dir: str = None, output_dir: str = None):
 
 if __name__ == "__main__":
     import argparse
+    config = get_config()
+    input_dir = config.get('paths.input_dir')
+    output_dir = config.get('paths.output_dir')
+    
+    print("--- [Path 설정 정보] ---")
+    for key, value in config.get('paths').items():
+        print(f"{key}: {value}")
+        
+        
+    print("--- [STT 설정 정보] ---")
+    for key, value in config.get('stt').items():
+        print(f"{key}: {value}")
+    
+    print("--- [LLM 설정 정보] ---")
+    for key, value in config.get('llm').items():
+        print(f"{key}: {value}")
+        
 
     parser = argparse.ArgumentParser(description="Batch process call recordings for STT and analysis.")
-    parser.add_argument("--input_dir", type=str, default="/home/ajung/workspace/sample_call", required=False, help="Input directory containing call audio files.")
-    parser.add_argument("--output_dir", type=str, default="/home/ajung/workspace/sample_call/output", required=False, help="Output directory for results.")
+    parser.add_argument("--input_dir", type=str, required=False, help="Input directory containing call audio files.", default=input_dir)
+    parser.add_argument("--output_dir", type=str, required=False, help="Output directory for results.", default=output_dir)
 
     args = parser.parse_args()
-    print(f"Input Directory: {args.input_dir}")
-    print(f"Input Directory: {args.output_dir}")
-    asyncio.run(process_batch(args.input_dir, args.output_dir)) 
+    asyncio.run(process_batch(args.input_dir, args.output_dir))

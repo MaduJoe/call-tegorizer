@@ -5,9 +5,16 @@
 stt:
   provider: whisper  # whisper, google, azure, aws
   model_name: medium  # tiny, base, small, medium, large, large-v3
-  language: Korean
+  language: ko
   device: cuda  # auto, cpu, cuda
-
+  fp16: true
+  beam_size: 1
+  best_of: 1
+  temperature: 0
+  condition_on_previous_text: false
+  task: transcribe
+  vad_filter: true
+  
   # 다른 STT 옵션 (provider 변경 시 활성화)
   # google:
   #   credentials_path: /path/to/credentials.json
@@ -21,7 +28,7 @@ llm:
   provider: ollama  # ollama, openai, anthropic, azure
   base_url: http://localhost:11434
   model: llama3.3:70b
-  temperature: 0.7
+  temperature: 0.1
   max_tokens: 2048
 
   # 다른 LLM 옵션 (provider 변경 시 활성화)
@@ -49,7 +56,7 @@ processing:
 
 # 경로 설정
 paths:
-  input_dir: /home/ajung/workspace/sample_call/01/12
+  input_dir: /home/ajung/workspace/sample_call/01/07
   output_dir: /home/ajung/workspace/sample_call/output
   categories_file: /home/ajung/workspace/call-tegorizer/categories.json
   log_dir: /home/ajung/workspace/call-tegorizer/logs
