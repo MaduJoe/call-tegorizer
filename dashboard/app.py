@@ -6,7 +6,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from collections import Counter
 import pandas as pd
 import plotly.express as px
-from config_loader import get_config
+from config import get_config
+from .cost_analysis_tab import CostAnalysisTab
 
 class CallAnalyticsDashboard:
     """Modern SaaS-style Call Analytics Dashboard"""
@@ -24,7 +25,7 @@ class CallAnalyticsDashboard:
         "주요 카테고리 선택",
         "세부 카테고리 선택",
         "고객의 주요 의도",
-        "해결됨/미해결/후속조치필요",
+        "해결됨/진행중/후속조치필요",
         "긍정/중립/부정",
     ]
 
@@ -47,13 +48,16 @@ class CallAnalyticsDashboard:
         return True
 
     def load_all_calls(self) -> List[Dict[str, Any]]:
-        """Load all call data (valid only)"""
+        """Load all call data (valid only, 날짜 오름차순 정렬)"""
         if 'all_calls' in self.data_cache:
             return self.data_cache['all_calls']
 
         all_calls = []
         invalid_count = 0
         for json_file in self.output_dir.rglob("*.json"):
+            # .transcript.json 파일은 제외 (STT 중간 결과물)
+            if json_file.name.endswith('.transcript.json'):
+                continue
             try:
                 with open(json_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -70,6 +74,9 @@ class CallAnalyticsDashboard:
 
         if invalid_count > 0:
             print(f"Filtered out {invalid_count} invalid call records")
+
+        # 날짜 기준 오름차순 정렬 (01/02 -> 01/05 순서)
+        all_calls.sort(key=lambda x: x.get('date', '99/99'))
 
         self.data_cache['all_calls'] = all_calls
         return all_calls
@@ -98,7 +105,7 @@ class CallAnalyticsDashboard:
             resolution = analysis.get('resolution', 'N/A')
             resolution_display = {
                 '해결됨': '✅ 해결됨',
-                '미해결': '⏳ 미해결',
+                '진행중': '⏳ 진행중',
                 '후속조치필요': '📋 후속조치'
             }.get(resolution, resolution)
 
@@ -143,7 +150,7 @@ class CallAnalyticsDashboard:
         if category_filter and category_filter != "전체":
             df = df[df['카테고리'] == category_filter]
         if resolution_filter and resolution_filter != "전체":
-            df = df[df['상태'].str.contains(resolution_filter.replace('해결됨', '해결').replace('미해결', '미해결').replace('후속조치필요', '후속'), na=False)]
+            df = df[df['상태'].str.contains(resolution_filter.replace('해결됨', '해결').replace('진행중', '진행중').replace('후속조치필요', '후속'), na=False)]
         if sentiment_filter and sentiment_filter != "전체":
             df = df[df['감정'].str.contains(sentiment_filter, na=False)]
 
@@ -208,7 +215,7 @@ class CallAnalyticsDashboard:
         resolution = analysis.get('resolution', 'N/A')
         resolution_class = {
             '해결됨': 'badge-resolved',
-            '미해결': 'badge-unresolved',
+            '진행중': 'badge-unresolved',
             '후속조치필요': 'badge-followup'
         }.get(resolution, 'badge-neutral')
 
@@ -419,8 +426,8 @@ class CallAnalyticsDashboard:
         stats = self.get_statistics()
         resolutions = stats.get('resolutions', {})
         # "부분적으로 해결됨" 제외, 순서 지정
-        order = ['해결됨', '미해결', '후속조치필요']
-        color_map = {'해결됨': '#22c55e', '미해결': '#f97316', '후속조치필요': '#ef4444'}
+        order = ['해결됨', '진행중', '후속조치필요']
+        color_map = {'해결됨': '#22c55e', '진행중': '#f97316', '후속조치필요': '#ef4444'}
         data = [{'해결 여부': k, '건수': resolutions.get(k, 0)}
                 for k in order if resolutions.get(k, 0) > 0]
         df = pd.DataFrame(data)
@@ -442,25 +449,24 @@ class CallAnalyticsDashboard:
 
     def build_ui(self):
         """Build Gradio UI"""
+        # Load CSS from external file
+        css_file = Path(__file__).parent.parent / "assets" / "css" / "design.css"
+        with open(css_file, 'r', encoding='utf-8') as f:
+            custom_css = f.read()
+
         # Load logo as base64
-        logo_path = Path(__file__).parent / "imgs" / "calltegorizer-gpt.png"
+        logo_path = Path(__file__).parent.parent / "assets" / "imgs" / "calltegorizer-main.png"
         with open(logo_path, "rb") as f:
             logo_base64 = base64.b64encode(f.read()).decode("utf-8")
 
         with gr.Blocks(
             title="Call-Tegorizer Dashboard",
+            css=custom_css,
         ) as demo:
 
-            # Header
+            # Header with background image
             gr.HTML(f"""
-            <div class="main-header">
-                <div class="header-content">
-                    <img src="data:image/png;base64,{logo_base64}" alt="Call-Tegorizer Logo" class="header-logo">
-                    <div class="header-text">
-                        <h1>Call-Tegorizer Dashboard</h1>
-                        <p>콜센터 녹취 자동 분석 결과 대시보드</p>
-                    </div>
-                </div>
+            <div class="main-header" style="background-image: url('data:image/png;base64,{logo_base64}');">
             </div>
             <script>
             // Row selection handler for data table
@@ -501,7 +507,7 @@ class CallAnalyticsDashboard:
 
             # Stats Cards - 액션 중심 지표
             stats = self.get_statistics()
-            unresolved_count = stats.get('resolutions', {}).get('미해결', 0)
+            unresolved_count = stats.get('resolutions', {}).get('진행중', 0)
             followup_count = stats.get('resolutions', {}).get('후속조치필요', 0)
             negative_count = stats.get('sentiments', {}).get('부정', 0)
 
@@ -513,7 +519,7 @@ class CallAnalyticsDashboard:
                 </div>
                 <div class="stat-card stat-card-warning">
                     <div class="stat-value">{unresolved_count}</div>
-                    <div class="stat-label">미해결 건수</div>
+                    <div class="stat-label">진행중 건수</div>
                 </div>
                 <div class="stat-card stat-card-alert">
                     <div class="stat-value">{followup_count}</div>
@@ -553,7 +559,7 @@ class CallAnalyticsDashboard:
                             elem_classes="filter-dropdown"
                         )
                         resolution_filter = gr.Dropdown(
-                            choices=["전체", "해결됨", "미해결", "후속조치필요"],
+                            choices=["전체", "해결됨", "진행중", "후속조치필요"],
                             value="전체",
                             label="상태",
                             scale=1,
@@ -776,7 +782,12 @@ class CallAnalyticsDashboard:
                         outputs=[category_chart, sunburst_chart, sentiment_chart, resolution_chart]
                     )
 
-                # Tab 3: Settings
+                # Tab 3: Cost Analysis (별도 모듈에서 관리)
+                with gr.Tab("💰 비용 분석", id="cost"):
+                    cost_tab = CostAnalysisTab(self)
+                    cost_tab.build_tab()
+
+                # Tab 4: Settings
                 with gr.Tab("⚙️ 시스템 정보", id="settings"):
                     config = get_config()
                     stt_config = config.get_stt_config()
@@ -811,10 +822,6 @@ class CallAnalyticsDashboard:
                                     <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">🎤 STT (Speech-to-Text)</h3>
                                     <div class="info-grid">
                                         <div class="info-item">
-                                            <div class="label">Provider</div>
-                                            <div class="value">{stt_config.get('provider', 'N/A')}</div>
-                                        </div>
-                                        <div class="info-item">
                                             <div class="label">Model</div>
                                             <div class="value">{stt_config.get('model_name', 'N/A')}</div>
                                         </div>
@@ -825,6 +832,10 @@ class CallAnalyticsDashboard:
                                         <div class="info-item">
                                             <div class="label">Device</div>
                                             <div class="value">{stt_config.get('device', 'N/A')}</div>
+                                        </div>
+                                        <div class="info-item">
+                                            <div class="label">Compute Type</div>
+                                            <div class="value">{stt_config.get('compute_type', 'N/A')}</div>
                                         </div>
                                     </div>
                                 </div>
@@ -876,14 +887,13 @@ class CallAnalyticsDashboard:
 
         return demo
 
+    def create_interface(self):
+        """Build and return Gradio interface (alias for build_ui)"""
+        return self.build_ui()
+
 
 if __name__ == "__main__":
     """Run dashboard"""
-    # Load CSS from external file
-    css_file = Path(__file__).parent / "design.css"
-    with open(css_file, 'r', encoding='utf-8') as f:
-        CUSTOM_CSS = f.read()
-
     config = get_config()
     dashboard_config = config.config.get('dashboard', {})
 
@@ -895,5 +905,4 @@ if __name__ == "__main__":
         server_port=dashboard_config.get('port', 7860),
         share=dashboard_config.get('share', False),
         auth=dashboard_config.get('auth'),
-        css=CUSTOM_CSS,
     )

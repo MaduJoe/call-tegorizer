@@ -8,43 +8,20 @@
 
 /* Header */
 .main-header {
-    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-    color: white;
-    padding: 24px 32px;
+    height: 100px;
     border-radius: 12px;
-    margin-bottom: 24px;
+    margin-bottom: 8px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    background-size: 100% auto;  /* 너비 100%, 높이 자동 (zoom-out 효과) */
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-color: #e0f2fe;  /* 이미지 배경색과 유사하게 */
+    object-position: center 20%;  /* 로고가 보이도록 위치 조정 */
+    display: block;
+    zoom: 2.5;  /* 이미지 확대 */
 }
 
-.main-header h1 {
-    margin: 0;
-    font-size: 28px;
-    font-weight: 700;
-    color: white;
-}
-
-.main-header p {
-    margin: 8px 0 0 0;
-    opacity: 0.9;
-    font-size: 14px;
-    color: white;
-}
-
-.header-content {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-}
-
-.header-logo {
-    width: 72px;
-    height: 72px;
-    border-radius: 12px;
-    object-fit: cover;
-    background: white;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
+/* Header text elements (for future use) */
 .header-text h1 {
     margin: 0;
     font-size: 28px;
@@ -824,4 +801,57 @@ body.dark .pagination-input input {
     background: #334155 !important;
     color: #e2e8f0 !important;
     border-color: #475569 !important;
+}
+
+/* Custom Tooltip Styles */
+.stat-card-tooltip {
+    position: relative;
+    cursor: help;
+}
+
+.stat-card-tooltip .tooltip-text {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e293b;
+    color: #f1f5f9;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-line;
+    min-width: 250px;
+    max-width: 350px;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: opacity 0.2s, visibility 0.2s;
+    margin-bottom: 8px;
+}
+
+.stat-card-tooltip .tooltip-text::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #1e293b;
+}
+
+.stat-card-tooltip:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Dark mode tooltip */
+.dark .stat-card-tooltip .tooltip-text {
+    background: #475569;
+    color: #f1f5f9;
+}
+
+.dark .stat-card-tooltip .tooltip-text::after {
+    border-top-color: #475569;
 }

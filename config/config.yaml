@@ -1,0 +1,62 @@
+# Call-Tegorizer Configuration
+# 모델 및 시스템 설정
+
+# STT (Speech-to-Text) 설정 - faster-whisper
+stt:
+  language: ko
+  model_name: medium  # tiny, base, small, medium, large, large-v3
+  device: cuda
+  compute_type: float16
+  batch_size: 16
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 500
+
+# LLM (Large Language Model) 설정
+llm:
+  provider: ollama  # ollama, openai, anthropic
+  base_url: http://localhost:11434
+  model: llama3.3:70b
+  temperature: 0.1
+  max_tokens: 2048
+
+# 처리 설정
+processing:
+  batch_size: 10
+  max_concurrent_llm: 5  # LLM 병렬 처리 수
+
+  # 재시도 설정
+  retry_attempts: 3
+  retry_delay: 5  # seconds
+
+  # 타임아웃
+  stt_timeout: 300  # seconds (5분)
+  llm_timeout: 120  # seconds (2분)
+
+# 경로 설정
+paths:
+  input_dir: /home/ajung/workspace/sample_call
+  output_dir: /home/ajung/workspace/sample_call/output
+  categories_file: /home/ajung/workspace/call-tegorizer/config/categories.json
+  log_dir: /home/ajung/workspace/call-tegorizer/logs
+
+# 로깅 설정
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  file_enabled: true
+  console_enabled: true
+
+# 대시보드 설정
+dashboard:
+  host: 0.0.0.0
+  port: 7860
+  share: false  # Gradio 공유 링크 생성 여부
+  auth: null  # [username, password] 형식으로 인증 설정 가능
+
+# 비용 분석 설정
+cost_analysis:
+  hourly_wage: 15000  # 상담사 시급 (원)
+  default_call_duration: 5  # 기본 평균 통화시간 (분)
+  automation_success_rate: 70  # 자동화 성공률 (%), 절감 계산에 사용
+  automatable_categories: []  # 자동화 가능 카테고리 (비워두면 자동 추천)

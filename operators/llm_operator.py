@@ -2,7 +2,7 @@ import requests
 import json
 from pathlib import Path
 from datetime import datetime
-from config_loader import get_config
+from config import get_config
 
 # 프롬프트 템플릿 값 - 검증에 사용
 INVALID_PATTERNS = [
@@ -10,7 +10,7 @@ INVALID_PATTERNS = [
     "주요 카테고리 선택",
     "세부 카테고리 선택",
     "고객의 주요 의도",
-    "해결됨/미해결/후속조치필요",
+    "해결됨/진행중/후속조치필요",
     "긍정/중립/부정",
     "키워드1",
     "키워드2",
@@ -56,7 +56,7 @@ class CallAnalyzer:
 2. 목록에 없는 값 생성 금지
 3. 적절한 카테고리가 없으면 "기타" > "일반문의" 선택
 4. 한국어로만 응답
-5. resolution은 반드시 "해결됨", "미해결", "후속조치필요" 중 하나만 선택
+5. resolution은 반드시 "해결됨", "진행중", "후속조치필요" 중 하나만 선택
 6. sentiment는 반드시 "긍정", "중립", "부정" 중 하나만 선택
 7. summary는 실제 통화 내용을 기반으로 구체적으로 작성
 
@@ -68,7 +68,7 @@ class CallAnalyzer:
     "category": "<위 목록에서 선택한 주요 카테고리>",
     "sub_category": "<위 목록에서 선택한 세부 카테고리>",
     "customer_intent": "<고객이 전화한 실제 목적>",
-    "resolution": "<해결됨 또는 미해결 또는 후속조치필요>",
+    "resolution": "<해결됨 또는 진행중 또는 후속조치필요>",
     "sentiment": "<긍정 또는 중립 또는 부정>",
     "keywords": ["<핵심키워드1>", "<핵심키워드2>", "<핵심키워드3>"],
     "action_required": "<후속 조치 내용 또는 null>"
@@ -129,7 +129,7 @@ JSON만 출력하고 다른 설명은 하지 마세요."""
                 return False, f"필수 필드 누락: {field}"
 
         # resolution 값 검증
-        valid_resolutions = ["해결됨", "미해결", "후속조치필요"]
+        valid_resolutions = ["해결됨", "진행중", "후속조치필요"]
         if result.get("resolution") not in valid_resolutions:
             return False, f"잘못된 resolution 값: {result.get('resolution')}"
 

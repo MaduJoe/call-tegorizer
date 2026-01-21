@@ -2,11 +2,15 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any
 
+# config 폴더 기준 경로
+CONFIG_DIR = Path(__file__).parent
+DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.yaml"
+
 class ConfigLoader:
     """설정 파일 로더"""
 
-    def __init__(self, config_path: str = "config.yaml"):
-        self.config_path = Path(config_path)
+    def __init__(self, config_path: str = None):
+        self.config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
         self._config = None
 
     @property

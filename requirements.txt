@@ -1,5 +1,5 @@
-# AI/ML
-openai-whisper==20250625
+# AI/ML - STT
+faster-whisper>=1.0.0
 torch>=2.0.0
 torchaudio>=2.0.0
 
@@ -18,6 +18,3 @@ gradio>=5.0.0
 # Data Processing
 pandas>=2.0.0
 numpy>=1.23.0
-
-# Utilities
-pathlib2>=2.3.7
