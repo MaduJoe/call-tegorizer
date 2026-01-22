@@ -6,19 +6,17 @@
     background: #f8fafc !important;
 }
 
-/* Header */
+Header
 .main-header {
     height: 100px;
     border-radius: 12px;
     margin-bottom: 8px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    background-size: 100% auto;  /* 너비 100%, 높이 자동 (zoom-out 효과) */
+    background-size: contain;  /* 이미지 전체가 보이도록 */
     background-position: center center;
     background-repeat: no-repeat;
     background-color: #e0f2fe;  /* 이미지 배경색과 유사하게 */
-    object-position: center 20%;  /* 로고가 보이도록 위치 조정 */
     display: block;
-    zoom: 2.5;  /* 이미지 확대 */
 }
 
 /* Header text elements (for future use) */
@@ -160,23 +158,57 @@
 .data-table {
     background: white;
     border-radius: 12px;
-    overflow: hidden;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     border: 1px solid #e2e8f0;
+    /* Fixed size to prevent resize on viewport change */
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    /* Allow content to be visible, not clipped */
+    overflow: visible !important;
 }
 
-/* Table scroll */
-.data-table .table-wrap {
-    overflow-y: auto !important;
+/* Gradio wrapper divs - prevent border duplication */
+.data-table > div,
+.data-table > div > div {
+    border: none !important;
+    box-shadow: none !important;
 }
 
+/* Table scroll container - ONLY the inner virtual table should scroll */
+.data-table > .table-wrap,
+.data-table > div > .table-wrap {
+    overflow: visible !important;
+    overflow-y: visible !important;
+    overflow-x: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    border: none !important;
+    border-right: none !important;
+}
+
+/* Inner table-wrap (inside button) handles the actual scrolling */
+.data-table button .table-wrap,
 .data-table svelte-virtual-table-viewport {
     overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: 550px !important;
+    min-height: 550px !important;
+    max-height: 550px !important;
+    border: none !important;
+}
+
+/* Svelte virtual table viewport */
+.data-table svelte-virtual-table-viewport {
+    overflow-y: auto !important;
+    border: none !important;
 }
 
 /* Custom scrollbar for data table */
 .data-table .table-wrap::-webkit-scrollbar {
     width: 8px;
+    height: 8px;
 }
 
 .data-table .table-wrap::-webkit-scrollbar-track {
@@ -193,38 +225,141 @@
     background: #94a3b8;
 }
 
+/* Table base - FIXED layout prevents resize on viewport change */
 .data-table table {
-    border-collapse: collapse;
-    width: 100%;
+    border-collapse: collapse !important;
+    width: 100% !important;
+    table-layout: fixed !important;  /* CRITICAL: Fixed layout prevents dynamic resizing */
+    border: none !important;
+    border-spacing: 0 !important;
 }
 
+/* Remove all borders from table elements */
+.data-table table,
+.data-table thead,
+.data-table tbody,
+.data-table tr,
+.data-table th,
+.data-table td {
+    border-left: none !important;
+    border-right: none !important;
+}
+
+/* Table header */
 .data-table thead th {
     background: #f8fafc !important;
-    padding: 14px 16px !important;
+    padding: 14px 12px !important;  /* Reduced horizontal padding */
     font-weight: 600 !important;
     font-size: 13px !important;
     color: #475569 !important;
     text-align: left !important;
     border-bottom: 2px solid #e2e8f0 !important;
+    border-top: none !important;
+    /* Prevent text overflow */
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    box-sizing: border-box !important;
 }
 
-.data-table thead th:nth-child(1) {
+/* Fixed column widths with box-sizing for accurate sizing */
+/* Total width budget: 100% distributed among 9 columns */
+
+/* 1: # - Row number */
+.data-table thead th:nth-child(1),
+.data-table tbody td:nth-child(1) {
+    width: 50px !important;
     min-width: 50px !important;
+    max-width: 50px !important;
+    text-align: center !important;
+    box-sizing: border-box !important;
 }
 
-.data-table thead th:nth-child(2) {
+/* 2: 날짜 */
+.data-table thead th:nth-child(2),
+.data-table tbody td:nth-child(2) {
+    width: 90px !important;
+    min-width: 90px !important;
+    max-width: 90px !important;
+    box-sizing: border-box !important;
+}
+
+/* 3: 첫콜 */
+.data-table thead th:nth-child(3),
+.data-table tbody td:nth-child(3) {
+    width: 70px !important;
+    min-width: 70px !important;
+    max-width: 70px !important;
+    text-align: center !important;
+    box-sizing: border-box !important;
+}
+
+/* 4: Call ID */
+.data-table thead th:nth-child(4),
+.data-table tbody td:nth-child(4) {
+    width: 130px !important;
+    min-width: 130px !important;
+    max-width: 130px !important;
+    box-sizing: border-box !important;
+}
+
+/* 5: 카테고리 */
+.data-table thead th:nth-child(5),
+.data-table tbody td:nth-child(5) {
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    box-sizing: border-box !important;
+}
+
+/* 6: 세부 */
+.data-table thead th:nth-child(6),
+.data-table tbody td:nth-child(6) {
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    box-sizing: border-box !important;
+}
+
+/* 7: 상태 */
+.data-table thead th:nth-child(7),
+.data-table tbody td:nth-child(7) {
+    width: 100px !important;
     min-width: 100px !important;
+    max-width: 100px !important;
+    box-sizing: border-box !important;
 }
 
-.data-table thead th:nth-child(n+3):nth-child(-n+6) {
-    min-width: 50px !important;
+/* 8: 감정 */
+.data-table thead th:nth-child(8),
+.data-table tbody td:nth-child(8) {
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
+    box-sizing: border-box !important;
 }
 
+/* 9: 요약 - Flexible column takes remaining space */
+.data-table thead th:nth-child(9),
+.data-table tbody td:nth-child(9) {
+    width: auto !important;
+    min-width: 150px !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    box-sizing: border-box !important;
+}
+
+/* Table body cells */
 .data-table tbody td {
-    padding: 14px 16px !important;
+    padding: 14px 12px !important;  /* Match header padding */
     font-size: 14px !important;
     border-bottom: 1px solid #f1f5f9 !important;
+    border-top: none !important;
     transition: background-color 0.15s ease !important;
+    /* Prevent cell content from expanding table */
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    box-sizing: border-box !important;
 }
 
 /* Banded Rows (Zebra Striping) - 줄무늬 행 */
@@ -854,4 +989,264 @@ body.dark .pagination-input input {
 
 .dark .stat-card-tooltip .tooltip-text::after {
     border-top-color: #475569;
+}
+
+/* ===== Firstcall Toggle Buttons ===== */
+.firstcall-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e2e8f0;
+}
+
+.firstcall-toggle {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 0 !important;
+}
+
+.firstcall-toggle .wrap {
+    display: flex !important;
+    gap: 0 !important;
+}
+
+.firstcall-toggle label {
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 8px 20px !important;
+    background: #f1f5f9 !important;
+    border: 1px solid #e2e8f0 !important;
+    cursor: pointer !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: #64748b !important;
+    transition: all 0.2s !important;
+    margin: 0 !important;
+}
+
+.firstcall-toggle label:first-child {
+    border-radius: 8px 0 0 8px !important;
+}
+
+.firstcall-toggle label:last-child {
+    border-radius: 0 8px 8px 0 !important;
+}
+
+.firstcall-toggle label:not(:last-child) {
+    border-right: none !important;
+}
+
+.firstcall-toggle label:hover {
+    background: #e2e8f0 !important;
+}
+
+.firstcall-toggle label.selected,
+.firstcall-toggle input:checked + label,
+.firstcall-toggle label[data-testid="전체"].selected,
+.firstcall-toggle label[data-testid="첫콜"].selected,
+.firstcall-toggle label[data-testid="재콜"].selected {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+    color: white !important;
+    border-color: #3b82f6 !important;
+    font-weight: 600 !important;
+}
+
+/* Firstcall counts badge */
+.firstcall-counts {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.count-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.count-badge.count-total {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.count-badge.count-firstcall {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.count-badge.count-repeat {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+/* Fix Gradio radio button styling */
+.firstcall-toggle .block {
+    border: none !important;
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+/* ===== Fixed Table Container ===== */
+/* Prevent table resize on viewport change (e.g., DevTools open/close) */
+
+/* Lock all Gradio wrapper elements */
+.data-table,
+.data-table > div,
+.data-table > div > div,
+.data-table [data-testid="table"],
+.data-table .table-wrap,
+.data-table .table-wrap > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* Lock the entire dataframe component size */
+.data-table.wrap {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: 100% !important;
+}
+
+/* Override Gradio's dynamic column width calculation */
+/* colgroup controls column widths - we need fixed widths */
+.data-table table colgroup {
+    display: table-column-group !important;
+}
+
+.data-table table colgroup col:nth-child(1) { width: 50px !important; }
+.data-table table colgroup col:nth-child(2) { width: 70px !important; }
+.data-table table colgroup col:nth-child(3) { width: 55px !important; }
+.data-table table colgroup col:nth-child(4) { width: 130px !important; }
+.data-table table colgroup col:nth-child(5) { width: 75px !important; }
+.data-table table colgroup col:nth-child(6) { width: 80px !important; }
+.data-table table colgroup col:nth-child(7) { width: 95px !important; }
+.data-table table colgroup col:nth-child(8) { width: 75px !important; }
+.data-table table colgroup col:nth-child(9) { width: auto !important; min-width: 150px !important; }
+
+/* Ensure the parent column doesn't cause resize */
+.data-table + .pagination-bar {
+    width: 100% !important;
+}
+
+/* ===== Remove ALL duplicate borders from Gradio table ===== */
+/* Target all possible border sources */
+.data-table table,
+.data-table thead,
+.data-table tbody,
+.data-table tr,
+.data-table th,
+.data-table td,
+.data-table [data-testid="table"],
+.data-table .table-wrap,
+.data-table .table-wrap > div,
+.data-table svelte-virtual-table-viewport {
+    border-left: none !important;
+    border-right: none !important;
+    border-collapse: collapse !important;
+}
+
+/* Explicitly remove right border from last column */
+.data-table thead th:last-child,
+.data-table tbody td:last-child {
+    border-right: none !important;
+}
+
+/* Explicitly remove left border from first column */
+.data-table thead th:first-child,
+.data-table tbody td:first-child {
+    border-left: none !important;
+}
+
+/* Remove any box-shadow that might look like a border */
+.data-table table,
+.data-table [data-testid="table"],
+.data-table .table-wrap > div {
+    box-shadow: none !important;
+}
+
+/* Ensure table fills container width without extra borders */
+.data-table .table-wrap {
+    border: none !important;
+}
+
+.data-table [data-testid="table"] {
+    border: none !important;
+    outline: none !important;
+}
+
+/* Handle Gradio's internal svelte classes */
+.data-table [class*="svelte-"] {
+    border-left: none !important;
+    border-right: none !important;
+}
+
+/* ===== NUCLEAR OPTION: Remove ALL borders from ANY element inside .data-table ===== */
+.data-table *,
+.data-table *::before,
+.data-table *::after {
+    border-left-color: transparent !important;
+    border-right-color: transparent !important;
+    outline: none !important;
+}
+
+/* Keep only the outer container border and bottom borders for rows */
+.data-table {
+    border: 1px solid #e2e8f0 !important;
+}
+
+.data-table thead th {
+    border-bottom: 2px solid #e2e8f0 !important;
+}
+
+.data-table tbody td {
+    border-bottom: 1px solid #f1f5f9 !important;
+}
+
+/* ===== Fix Gradio Dataframe internal button wrapper ===== */
+/* This button wraps the virtual table and can have borders */
+.data-table button.svelte-1o7nwih,
+.data-table button.disable_click,
+.data-table button[aria-dropeffect="copy"],
+.data-table .svelte-1o7nwih {
+    border: none !important;
+    border-left: none !important;
+    border-right: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+/* Remove border and padding from nested .table-wrap inside button */
+.data-table button .table-wrap,
+.data-table button > div {
+    border: none !important;
+    border-left: none !important;
+    border-right: none !important;
+    padding: 0 !important;
+}
+
+/* Remove padding from all table-wrap elements */
+.data-table .table-wrap {
+    padding: 0 !important;
+    padding-right: 0 !important;
+}
+
+/* Remove padding from table-container */
+.data-table .table-container,
+.data-table .table-container.svelte-4x7jh,
+.data-table [class*="table-container"] {
+    padding: 0 !important;
+    padding-right: 0 !important;
 }
