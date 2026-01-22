@@ -142,7 +142,6 @@ async def process_call_llm_only(stt_file: Path, analyzer, output_path, progress:
 
     print(f"  Processing LLM for {call_id}...")
 
-    llm_start = time.time()
     loop = asyncio.get_event_loop()
 
     analysis = await loop.run_in_executor(
@@ -150,8 +149,6 @@ async def process_call_llm_only(stt_file: Path, analyzer, output_path, progress:
         analyzer.summarize,
         data["transcript"]["merged"]
     )
-    llm_end = time.time()
-    print(f"    ✓ LLM completed in {llm_end - llm_start:.2f} seconds")
 
     # 최종 결과 저장 (transcript + analysis)
     result = {
@@ -282,7 +279,7 @@ async def process_batch(input_dir: str = None, output_dir: str = None, phase: st
 
 async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, not_firstcall: bool = False):
     """Phase 1: STT만 처리"""
-    from mark_firstcall.firstcall_filter import filter_call_ids
+    from utils.firstcall_filter import filter_call_ids
 
     day_folders = get_day_folders(input_path)
     print(f"Found {len(day_folders)} day folders to process.")
@@ -316,7 +313,7 @@ async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, 
 
 async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = False):
     """Phase 2: LLM만 처리 (.transcript.json 파일 기반)"""
-    from mark_firstcall.firstcall_filter import get_all_not_firstcall_ids
+    from utils.firstcall_filter import get_all_not_firstcall_ids
 
     # .transcript.json 파일 찾기
     stt_files = list(output_path.glob("**/*.transcript.json"))
@@ -359,7 +356,7 @@ async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = F
 
 async def process_phase_all(input_path: Path, output_path: Path, stt, analyzer, stt_lock, not_firstcall: bool = False):
     """통합 처리 (STT + LLM)"""
-    from mark_firstcall.firstcall_filter import filter_call_ids
+    from utils.firstcall_filter import filter_call_ids
 
     day_folders = get_day_folders(input_path)
     print(f"Found {len(day_folders)} day folders to process.")

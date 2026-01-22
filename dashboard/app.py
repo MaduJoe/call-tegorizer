@@ -23,7 +23,7 @@ class CallAnalyticsDashboard:
     def _load_firstcall_data(self) -> dict:
         """Excel에서 첫콜 데이터 로드 - {day: {filename: is_firstcall}}"""
         try:
-            from mark_firstcall.firstcall_filter import load_firstcall_data
+            from utils.firstcall_filter import load_firstcall_data
             return load_firstcall_data()
         except Exception as e:
             print(f"첫콜 데이터 로드 실패: {e}")
