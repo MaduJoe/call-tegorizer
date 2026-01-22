@@ -53,6 +53,13 @@ class CallAnalyticsDashboard:
             'unknown': len(calls) - firstcall_count - repeat_count
         }
 
+    def _get_claim_count(self) -> int:
+        """클레임(민원) 건수 반환"""
+        calls = self.load_all_calls()
+        return sum(1 for c in calls
+                   if c.get('analysis', {}).get('inquiry_type') == '클레임'
+                   or c.get('analysis', {}).get('sub_category') == '클레임')
+
     # 프롬프트 템플릿 값 - 검증에 사용
     INVALID_PATTERNS = [
         "통화 내용 3줄 요약",
@@ -199,11 +206,13 @@ class CallAnalyticsDashboard:
             ), axis=1)
             df = df[mask]
 
-        # Firstcall toggle filter (전체/첫콜/재콜)
+        # Firstcall toggle filter (전체/첫콜/재콜/클레임)
         if firstcall_filter == "첫콜":
             df = df[df['첫콜'].str.contains('첫콜', na=False)]
         elif firstcall_filter == "재콜":
             df = df[df['첫콜'].str.contains('재콜', na=False)]
+        elif firstcall_filter == "클레임":
+            df = df[df['세부'].str.contains('클레임', na=False)]
 
         # Dropdown filters
         if date_filter and date_filter != "전체":
@@ -730,9 +739,40 @@ class CallAnalyticsDashboard:
         with open(logo_path, "rb") as f:
             logo_base64 = base64.b64encode(f.read()).decode("utf-8")
 
+        # JavaScript for stat-card click → filter
+        custom_js = """
+        function selectCallTypeFilter(filterValue) {
+            // 통화 목록 탭으로 먼저 이동
+            const tabs = document.querySelectorAll('button[role="tab"]');
+            tabs.forEach(tab => {
+                if (tab.textContent.includes('통화 목록')) {
+                    tab.click();
+                }
+            });
+
+            // 숨겨진 Textbox에 값 설정하여 Gradio 이벤트 트리거
+            setTimeout(() => {
+                const container = document.querySelector('#stat-card-filter-trigger');
+                if (!container) {
+                    console.log('stat-card-filter-trigger not found');
+                    return;
+                }
+                const hiddenInput = container.querySelector('textarea, input');
+                if (hiddenInput) {
+                    hiddenInput.value = filterValue;
+                    hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }, 150);
+        }
+        // 전역 스코프에 등록
+        window.selectCallTypeFilter = selectCallTypeFilter;
+        """
+
         with gr.Blocks(
             title="Call-Tegorizer Dashboard",
             css=custom_css,
+            js=custom_js,
         ) as demo:
 
             # Header with background image
@@ -774,32 +814,39 @@ class CallAnalyticsDashboard:
             </script>
             """)
 
-            # Stats Cards - 액션 중심 지표
+            # Stats Cards - 첫콜/재콜 및 클레임 중심 지표
             stats = self.get_statistics()
-            unresolved_count = stats.get('resolutions', {}).get('진행중', 0)
-            followup_count = stats.get('resolutions', {}).get('후속조치필요', 0)
-            negative_count = stats.get('sentiments', {}).get('부정', 0)
+            firstcall_stats = self._get_firstcall_stats()
+            claim_count = self._get_claim_count()
 
             gr.HTML(f"""
             <div class="stats-row">
-                <div class="stat-card">
+                <div class="stat-card stat-card-clickable" onclick="selectCallTypeFilter('전체')">
                     <div class="stat-value">{stats.get('total_calls', 0)}</div>
                     <div class="stat-label">총 통화 건수</div>
                 </div>
-                <div class="stat-card stat-card-warning">
-                    <div class="stat-value">{unresolved_count}</div>
-                    <div class="stat-label">진행중 건수</div>
+                <div class="stat-card stat-card-info stat-card-clickable" onclick="selectCallTypeFilter('첫콜')">
+                    <div class="stat-value">{firstcall_stats['firstcall']}</div>
+                    <div class="stat-label">첫콜 건수</div>
                 </div>
-                <div class="stat-card stat-card-alert">
-                    <div class="stat-value">{followup_count}</div>
-                    <div class="stat-label">후속조치 필요</div>
+                <div class="stat-card stat-card-warning stat-card-clickable" onclick="selectCallTypeFilter('재콜')">
+                    <div class="stat-value">{firstcall_stats['repeat']}</div>
+                    <div class="stat-label">재콜 건수</div>
                 </div>
-                <div class="stat-card stat-card-danger">
-                    <div class="stat-value">{negative_count}</div>
-                    <div class="stat-label">부정적 통화</div>
+                <div class="stat-card stat-card-danger stat-card-clickable" onclick="selectCallTypeFilter('클레임')">
+                    <div class="stat-value">{claim_count}</div>
+                    <div class="stat-label">클레임 건수</div>
                 </div>
             </div>
             """)
+
+            # 숨겨진 필터 트리거 (stat-card 클릭 → Radio 값 변경)
+            stat_card_filter = gr.Textbox(
+                value="",
+                elem_id="stat-card-filter-trigger",
+                elem_classes="hidden-trigger",
+                container=False
+            )
 
             with gr.Tabs() as tabs:
                 # Tab 1: Call List
@@ -807,9 +854,10 @@ class CallAnalyticsDashboard:
                     # Firstcall Toggle Buttons (Carousel-like)
                     with gr.Row(elem_classes="firstcall-toggle-row"):
                         firstcall_toggle = gr.Radio(
-                            choices=["전체", "첫콜", "재콜"],
+                            choices=["전체", "첫콜", "재콜", "클레임"],
                             value="전체",
                             label="",
+                            elem_id="call-type-toggle",
                             elem_classes="firstcall-toggle",
                             container=False
                         )
@@ -1024,6 +1072,13 @@ class CallAnalyticsDashboard:
                         fn=go_next_page,
                         inputs=[page_num, current_total, search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                         outputs=[call_table, page_num, pagination_info, current_df]
+                    )
+
+                    # Stat card 클릭 → Radio 버튼 자동 선택
+                    stat_card_filter.change(
+                        fn=lambda x: x if x in ["전체", "첫콜", "재콜", "클레임"] else "전체",
+                        inputs=[stat_card_filter],
+                        outputs=[firstcall_toggle]
                     )
 
                     # refresh_btn.click(

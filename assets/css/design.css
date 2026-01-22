@@ -6,6 +6,20 @@
     background: #f8fafc !important;
 }
 
+/* Hidden trigger for stat-card click events */
+.hidden-trigger,
+#stat-card-filter-trigger {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
 Header
 .main-header {
     height: 100px;
@@ -62,14 +76,23 @@ Header
     margin-top: 4px;
 }
 
-/* Stat Card Variants - 액션 중심 지표 */
+/* Stat Card Variants - 첫콜/재콜/클레임 지표 */
+.stat-card-info {
+    border-left: 4px solid #3b82f6;
+    background: linear-gradient(135deg, #ecfeff 0%, #ffffff 100%);
+}
+
+.stat-card-info .stat-value {
+    color: #0891b2;
+}
+
 .stat-card-warning {
-    border-left: 4px solid #f97316;
+    border-left: 4px solid #f59e0b;
     background: linear-gradient(135deg, #fff7ed 0%, #ffffff 100%);
 }
 
 .stat-card-warning .stat-value {
-    color: #ea580c;
+    color: #d97706;
 }
 
 .stat-card-alert {
@@ -88,6 +111,22 @@ Header
 
 .stat-card-danger .stat-value {
     color: #dc2626;
+}
+
+/* Clickable Stat Card */
+.stat-card-clickable {
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-card-clickable:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+
+.stat-card-clickable:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* Filter Bar */
@@ -1045,15 +1084,44 @@ body.dark .pagination-input input {
     background: #e2e8f0 !important;
 }
 
+/* 기본 선택 스타일 (전체 - 파란색) */
 .firstcall-toggle label.selected,
 .firstcall-toggle input:checked + label,
-.firstcall-toggle label[data-testid="전체"].selected,
-.firstcall-toggle label[data-testid="첫콜"].selected,
-.firstcall-toggle label[data-testid="재콜"].selected {
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+.firstcall-toggle label:has(input:checked) {
+    background: linear-gradient(135deg, #d4dbe7 0%, #5c5d5f 100%) !important;
     color: white !important;
-    border-color: #3b82f6 !important;
+    border-color: #d4dbe7 !important;
     font-weight: 600 !important;
+}
+
+/* 첫콜 버튼 선택 시 청록색 (info) */
+.firstcall-toggle label:nth-of-type(2).selected,
+.firstcall-toggle label:nth-of-type(2):has(input:checked),
+.firstcall-toggle label:nth-child(2).selected,
+.firstcall-toggle label:nth-child(2):has(input:checked) {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%) !important;
+    color: white !important;
+    border-color: #06b6d4 !important;
+}
+
+/* 재콜 버튼 선택 시 주황색 (warning) */
+.firstcall-toggle label:nth-of-type(3).selected,
+.firstcall-toggle label:nth-of-type(3):has(input:checked),
+.firstcall-toggle label:nth-child(3).selected,
+.firstcall-toggle label:nth-child(3):has(input:checked) {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+    color: white !important;
+    border-color: #f59e0b !important;
+}
+
+/* 클레임 버튼 선택 시 빨간색 (danger) */
+.firstcall-toggle label:nth-of-type(4).selected,
+.firstcall-toggle label:nth-of-type(4):has(input:checked),
+.firstcall-toggle label:nth-child(4).selected,
+.firstcall-toggle label:nth-child(4):has(input:checked) {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    color: white !important;
+    border-color: #ef4444 !important;
 }
 
 /* Firstcall counts badge */
