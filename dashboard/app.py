@@ -18,6 +18,40 @@ class CallAnalyticsDashboard:
         self.data_cache = {}
         self.page_size = 10
         self.current_page = 0
+        self.firstcall_data = self._load_firstcall_data()
+
+    def _load_firstcall_data(self) -> dict:
+        """Excel에서 첫콜 데이터 로드 - {day: {filename: is_firstcall}}"""
+        try:
+            from mark_firstcall.firstcall_filter import load_firstcall_data
+            return load_firstcall_data()
+        except Exception as e:
+            print(f"첫콜 데이터 로드 실패: {e}")
+            return {}
+
+    def _get_is_firstcall(self, call_id: str, date: str) -> bool | None:
+        """특정 콜의 첫콜 여부 반환 (None: 데이터 없음)"""
+        if not self.firstcall_data or not date:
+            return None
+        # date format: "01/02" -> day = "02"
+        parts = date.split('/')
+        day = parts[1] if len(parts) == 2 else parts[0]
+        day_data = self.firstcall_data.get(day, {})
+        if call_id in day_data:
+            return day_data[call_id]
+        return None
+
+    def _get_firstcall_stats(self) -> dict:
+        """첫콜/재콜 통계 반환"""
+        calls = self.load_all_calls()
+        firstcall_count = sum(1 for c in calls if c.get('_is_firstcall') is True)
+        repeat_count = sum(1 for c in calls if c.get('_is_firstcall') is False)
+        return {
+            'total': len(calls),
+            'firstcall': firstcall_count,
+            'repeat': repeat_count,
+            'unknown': len(calls) - firstcall_count - repeat_count
+        }
 
     # 프롬프트 템플릿 값 - 검증에 사용
     INVALID_PATTERNS = [
@@ -66,6 +100,10 @@ class CallAnalyticsDashboard:
 
                     # 유효한 데이터만 추가
                     if self._is_valid_call(data):
+                        # 첫콜 여부 추가
+                        call_id = data.get('call_id', '')
+                        date = data.get('date', '')
+                        data['_is_firstcall'] = self._get_is_firstcall(call_id, date)
                         all_calls.append(data)
                     else:
                         invalid_count += 1
@@ -96,25 +134,40 @@ class CallAnalyticsDashboard:
             # Format sentiment with emoji
             sentiment = analysis.get('sentiment', 'N/A')
             sentiment_display = {
-                '긍정': '🟢 긍정',
-                '부정': '🔴 부정',
-                '중립': '⚪ 중립'
+                '긍정': '🟢긍정',
+                '부정': '🔴부정',
+                '중립': '⚪중립'
             }.get(sentiment, sentiment)
 
             # Format resolution with emoji
             resolution = analysis.get('resolution', 'N/A')
             resolution_display = {
-                '해결됨': '✅ 해결됨',
-                '진행중': '⏳ 진행중',
+                '해결됨': '✅해결됨',
+                '진행중': '⏳진행중',
                 '후속조치필요': '📋 후속조치'
             }.get(resolution, resolution)
+
+            # Format firstcall with emoji
+            is_firstcall = call.get('_is_firstcall')
+            if is_firstcall is True:
+                firstcall_display = '첫콜'
+            elif is_firstcall is False:
+                firstcall_display = '재콜'
+            else:
+                firstcall_display = '➖'
+
+            # Format tags
+            tags = analysis.get('tags', [])
+            tags_display = ', '.join(tags) if tags else ''
 
             data.append({
                 '#': idx + 1,
                 '날짜': call.get('date', 'N/A'),
+                '첫콜': firstcall_display,
                 'Call ID': call_id[:7] + '...' + call_id[-7:] if len(call_id) > 14 else call_id,
                 '카테고리': analysis.get('category', 'N/A'),
-                '세부': analysis.get('sub_category', 'N/A'),
+                '세부': analysis.get('sub_category') or analysis.get('inquiry_type', 'N/A'),
+                '태그': tags_display,
                 '상태': resolution_display,
                 '감정': sentiment_display,
                 '요약': summary[:60] + '...' if len(summary) > 60 else summary,
@@ -129,6 +182,8 @@ class CallAnalyticsDashboard:
         category_filter: str,
         resolution_filter: str,
         sentiment_filter: str,
+        tag_filter: str = "전체",
+        firstcall_filter: str = "전체",
         page: int = 0,
     ) -> Tuple[pd.DataFrame, int]:
         """Apply filters and search, return paginated results and total count"""
@@ -144,6 +199,12 @@ class CallAnalyticsDashboard:
             ), axis=1)
             df = df[mask]
 
+        # Firstcall toggle filter (전체/첫콜/재콜)
+        if firstcall_filter == "첫콜":
+            df = df[df['첫콜'].str.contains('첫콜', na=False)]
+        elif firstcall_filter == "재콜":
+            df = df[df['첫콜'].str.contains('재콜', na=False)]
+
         # Dropdown filters
         if date_filter and date_filter != "전체":
             df = df[df['날짜'] == date_filter]
@@ -153,6 +214,8 @@ class CallAnalyticsDashboard:
             df = df[df['상태'].str.contains(resolution_filter.replace('해결됨', '해결').replace('진행중', '진행중').replace('후속조치필요', '후속'), na=False)]
         if sentiment_filter and sentiment_filter != "전체":
             df = df[df['감정'].str.contains(sentiment_filter, na=False)]
+        if tag_filter and tag_filter != "전체":
+            df = df[df['태그'].str.contains(tag_filter, na=False)]
 
         df = df.reset_index(drop=True)
         total_count = len(df)
@@ -180,6 +243,10 @@ class CallAnalyticsDashboard:
                 values.add(call.get('analysis', {}).get('resolution', 'N/A'))
             elif column == '감정':
                 values.add(call.get('analysis', {}).get('sentiment', 'N/A'))
+            elif column == '태그':
+                tags = call.get('analysis', {}).get('tags', [])
+                for tag in tags:
+                    values.add(tag)
 
         return sorted([v for v in values if v and v != 'N/A'])
 
@@ -220,6 +287,16 @@ class CallAnalyticsDashboard:
         }.get(resolution, 'badge-neutral')
 
         keywords = ', '.join(analysis.get('keywords', [])) or '없음'
+
+        # 태그 (특이사항) 배지 생성
+        tags = analysis.get('tags', [])
+        if tags:
+            tags_html = ' '.join([
+                f'<span style="background: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; margin-right: 6px;">{tag}</span>'
+                for tag in tags
+            ])
+        else:
+            tags_html = '<span style="color: #9ca3af;">없음</span>'
 
         detail_html = f"""
         <div class="detail-panel">
@@ -265,6 +342,11 @@ class CallAnalyticsDashboard:
             <div style="margin-bottom: 20px;">
                 <div class="label" style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600;">🏷️ 키워드</div>
                 <div style="font-size: 14px; color: #475569;">{keywords}</div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <div class="label" style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600;">🔖 특이사항</div>
+                <div style="font-size: 14px;">{tags_html}</div>
             </div>
 
             <div style="margin-bottom: 20px;">
@@ -447,6 +529,195 @@ class CallAnalyticsDashboard:
             )
         return fig
 
+    def create_firstcall_comparison_chart(self):
+        """첫콜 vs 재콜 비율 파이차트"""
+        stats = self._get_firstcall_stats()
+        data = [
+            {'유형': '첫콜', '건수': stats['firstcall']},
+            {'유형': '재콜', '건수': stats['repeat']},
+        ]
+        df = pd.DataFrame(data)
+
+        if df['건수'].sum() == 0:
+            fig = px.pie(title="데이터 없음")
+        else:
+            color_map = {'첫콜': '#3b82f6', '재콜': '#f59e0b'}
+            fig = px.pie(df, values='건수', names='유형', color='유형',
+                        color_discrete_map=color_map, hole=0.4)
+            fig.update_traces(textposition='outside', textinfo='label+value+percent')
+            fig.update_layout(
+                height=400,
+                margin=dict(t=30, b=30, l=30, r=30),
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5)
+            )
+        return fig
+
+    def create_category_comparison_chart(self):
+        """카테고리별 첫콜/재콜 분포 비교 차트 (합계 기준 내림차순)"""
+        calls = self.load_all_calls()
+        if not calls:
+            return px.bar(title="데이터 없음")
+
+        data = []
+        for call in calls:
+            is_firstcall = call.get('_is_firstcall')
+            category = call.get('analysis', {}).get('category')
+            if category and category != 'N/A' and is_firstcall is not None:
+                call_type = '첫콜' if is_firstcall else '재콜'
+                data.append({'카테고리': category, '유형': call_type})
+
+        if not data:
+            return px.bar(title="데이터 없음")
+
+        df = pd.DataFrame(data)
+        counts = df.groupby(['카테고리', '유형']).size().reset_index(name='건수')
+
+        # 첫콜+재콜 합계 기준 내림차순 정렬
+        category_totals = counts.groupby('카테고리')['건수'].sum().sort_values(ascending=False)
+        category_order = category_totals.index.tolist()
+        counts['카테고리'] = pd.Categorical(counts['카테고리'], categories=category_order, ordered=True)
+        counts = counts.sort_values('카테고리')
+
+        color_map = {'첫콜': '#3b82f6', '재콜': '#f59e0b'}
+        fig = px.bar(counts, x='카테고리', y='건수', color='유형', barmode='group',
+                    color_discrete_map=color_map, text='건수')
+        fig.update_traces(textposition='outside')
+        fig.update_layout(
+            height=530,
+            margin=dict(t=30, b=40, l=40, r=40),
+            xaxis_title="카테고리",
+            yaxis_title="건수",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        return fig
+
+    def create_daily_trend_chart(self):
+        """일자별 첫콜/재콜 추이 차트"""
+        calls = self.load_all_calls()
+        if not calls:
+            return px.line(title="데이터 없음")
+
+        data = []
+        all_dates = set()
+        for call in calls:
+            is_firstcall = call.get('_is_firstcall')
+            date = call.get('date', '')
+            if date:
+                all_dates.add(date)
+                if is_firstcall is not None:
+                    call_type = '첫콜' if is_firstcall else '재콜'
+                    data.append({'날짜': date, '유형': call_type})
+
+        if not data or not all_dates:
+            return px.line(title="데이터 없음")
+
+        df = pd.DataFrame(data)
+        counts = df.groupby(['날짜', '유형']).size().reset_index(name='건수')
+
+        # 모든 날짜 x 유형 조합 생성 (0건도 표시하기 위해)
+        all_dates_sorted = sorted(all_dates)
+        all_types = ['첫콜', '재콜']
+        full_index = pd.MultiIndex.from_product([all_dates_sorted, all_types], names=['날짜', '유형'])
+        counts_full = counts.set_index(['날짜', '유형']).reindex(full_index, fill_value=0).reset_index()
+
+        color_map = {'첫콜': '#3b82f6', '재콜': '#f59e0b'}
+        fig = px.line(counts_full, x='날짜', y='건수', color='유형', markers=True,
+                     color_discrete_map=color_map)
+        fig.update_layout(
+            height=400,
+            margin=dict(t=30, b=40, l=40, r=40),
+            xaxis_title="날짜",
+            yaxis_title="건수",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        return fig
+
+    def create_resolution_comparison_chart(self):
+        """첫콜/재콜별 해결률 비교 차트"""
+        calls = self.load_all_calls()
+        if not calls:
+            return px.bar(title="데이터 없음")
+
+        # 첫콜/재콜별 해결 현황 집계
+        stats = {'첫콜': Counter(), '재콜': Counter()}
+        for call in calls:
+            is_firstcall = call.get('_is_firstcall')
+            resolution = call.get('analysis', {}).get('resolution')
+            if resolution and resolution != 'N/A' and is_firstcall is not None:
+                call_type = '첫콜' if is_firstcall else '재콜'
+                stats[call_type][resolution] += 1
+
+        # 해결률 계산
+        data = []
+        for call_type, resolutions in stats.items():
+            total = sum(resolutions.values())
+            if total > 0:
+                resolved = resolutions.get('해결됨', 0)
+                rate = (resolved / total) * 100
+                data.append({
+                    '유형': call_type,
+                    '해결률': round(rate, 1),
+                    '해결': resolved,
+                    '총 건수': total
+                })
+
+        if not data:
+            return px.bar(title="데이터 없음")
+
+        df = pd.DataFrame(data)
+        color_map = {'첫콜': '#3b82f6', '재콜': '#f59e0b'}
+        fig = px.bar(df, x='유형', y='해결률', color='유형', text='해결률',
+                    color_discrete_map=color_map)
+        fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+        fig.update_layout(
+            height=400,
+            margin=dict(t=30, b=40, l=40, r=40),
+            xaxis_title="",
+            yaxis_title="해결률 (%)",
+            yaxis=dict(range=[0, 100]),
+            showlegend=False
+        )
+        return fig
+
+    def create_sentiment_comparison_chart(self):
+        """첫콜/재콜별 감정 비교 차트"""
+        calls = self.load_all_calls()
+        if not calls:
+            return px.bar(title="데이터 없음")
+
+        data = []
+        for call in calls:
+            is_firstcall = call.get('_is_firstcall')
+            sentiment = call.get('analysis', {}).get('sentiment')
+            if sentiment and sentiment != 'N/A' and is_firstcall is not None:
+                call_type = '첫콜' if is_firstcall else '재콜'
+                data.append({'유형': call_type, '감정': sentiment})
+
+        if not data:
+            return px.bar(title="데이터 없음")
+
+        df = pd.DataFrame(data)
+        counts = df.groupby(['감정', '유형']).size().reset_index(name='건수')
+
+        # 순서 지정
+        sentiment_order = ['긍정', '중립', '부정']
+        counts['감정'] = pd.Categorical(counts['감정'], categories=sentiment_order, ordered=True)
+        counts = counts.sort_values('감정')
+
+        color_map = {'첫콜': '#3b82f6', '재콜': '#f59e0b'}
+        fig = px.bar(counts, x='감정', y='건수', color='유형', barmode='group',
+                    color_discrete_map=color_map, text='건수')
+        fig.update_traces(textposition='outside')
+        fig.update_layout(
+            height=400,
+            margin=dict(t=30, b=40, l=40, r=40),
+            xaxis_title="",
+            yaxis_title="건수",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        return fig
+
     def build_ui(self):
         """Build Gradio UI"""
         # Load CSS from external file
@@ -466,9 +737,7 @@ class CallAnalyticsDashboard:
 
             # Header with background image
             gr.HTML(f"""
-            <div class="main-header" style="background-image: url('data:image/png;base64,{logo_base64}');">
-            </div>
-            <script>
+            <script> 
             // Row selection handler for data table
             document.addEventListener('DOMContentLoaded', function() {{
                 function initRowSelection() {{
@@ -535,6 +804,16 @@ class CallAnalyticsDashboard:
             with gr.Tabs() as tabs:
                 # Tab 1: Call List
                 with gr.Tab("📋 통화 목록", id="list"):
+                    # Firstcall Toggle Buttons (Carousel-like)
+                    with gr.Row(elem_classes="firstcall-toggle-row"):
+                        firstcall_toggle = gr.Radio(
+                            choices=["전체", "첫콜", "재콜"],
+                            value="전체",
+                            label="",
+                            elem_classes="firstcall-toggle",
+                            container=False
+                        )
+
                     # Filter Bar
                     with gr.Row(elem_classes="filter-bar"):
                         search_input = gr.Textbox(
@@ -569,6 +848,13 @@ class CallAnalyticsDashboard:
                             choices=["전체", "긍정", "중립", "부정"],
                             value="전체",
                             label="감정",
+                            scale=1,
+                            elem_classes="filter-dropdown"
+                        )
+                        tag_filter = gr.Dropdown(
+                            choices=["전체"] + self.get_column_unique_values("태그"),
+                            value="전체",
+                            label="태그",
                             scale=1,
                             elem_classes="filter-dropdown"
                         )
@@ -631,9 +917,9 @@ class CallAnalyticsDashboard:
                             return self._empty_detail_html(), ""
                         return self.format_detail_html(int(row_num))
 
-                    def apply_filters(search, date_f, cat_f, res_f, sent_f, page_n):
+                    def apply_filters(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, page_n):
                         page = max(0, int(page_n) - 1) if page_n else 0
-                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, page)
+                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, page)
 
                         # Calculate pagination info
                         start_idx = page * self.page_size + 1
@@ -644,9 +930,9 @@ class CallAnalyticsDashboard:
 
                         return df, info, total, df  # Also return df for current_df state
 
-                    def go_prev_page(page_n, search, date_f, cat_f, res_f, sent_f):
+                    def go_prev_page(page_n, search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f):
                         new_page = max(1, int(page_n) - 1)
-                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, new_page - 1)
+                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, new_page - 1)
 
                         start_idx = (new_page - 1) * self.page_size + 1
                         end_idx = min(new_page * self.page_size, total)
@@ -656,10 +942,10 @@ class CallAnalyticsDashboard:
 
                         return df, new_page, info, df  # Also return df for current_df state
 
-                    def go_next_page(page_n, total_count, search, date_f, cat_f, res_f, sent_f):
+                    def go_next_page(page_n, total_count, search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f):
                         total_pages = (total_count + self.page_size - 1) // self.page_size
                         new_page = min(total_pages, int(page_n) + 1)
-                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, new_page - 1)
+                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, new_page - 1)
 
                         start_idx = (new_page - 1) * self.page_size + 1
                         end_idx = min(new_page * self.page_size, total)
@@ -700,33 +986,43 @@ class CallAnalyticsDashboard:
                     )
 
                     # Auto-filter on input change (reset to page 1)
-                    for filter_input in [search_input, date_filter, category_filter, resolution_filter, sentiment_filter]:
+                    for filter_input in [search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter]:
                         filter_input.change(
-                            fn=lambda s, d, c, r, se: apply_filters(s, d, c, r, se, 1),
-                            inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter],
+                            fn=lambda s, d, c, r, se, t, fc: apply_filters(s, d, c, r, se, t, fc, 1),
+                            inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                             outputs=[call_table, pagination_info, current_total, current_df]
                         ).then(
                             fn=lambda: 1,
                             outputs=page_num
                         )
 
+                    # Firstcall toggle change
+                    firstcall_toggle.change(
+                        fn=lambda s, d, c, r, se, t, fc: apply_filters(s, d, c, r, se, t, fc, 1),
+                        inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
+                        outputs=[call_table, pagination_info, current_total, current_df]
+                    ).then(
+                        fn=lambda: 1,
+                        outputs=page_num
+                    )
+
                     # Page number change
                     page_num.change(
                         fn=apply_filters,
-                        inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter, page_num],
+                        inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle, page_num],
                         outputs=[call_table, pagination_info, current_total, current_df]
                     )
 
                     # Previous/Next buttons
                     prev_btn.click(
                         fn=go_prev_page,
-                        inputs=[page_num, search_input, date_filter, category_filter, resolution_filter, sentiment_filter],
+                        inputs=[page_num, search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                         outputs=[call_table, page_num, pagination_info, current_df]
                     )
 
                     next_btn.click(
                         fn=go_next_page,
-                        inputs=[page_num, current_total, search_input, date_filter, category_filter, resolution_filter, sentiment_filter],
+                        inputs=[page_num, current_total, search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                         outputs=[call_table, page_num, pagination_info, current_df]
                     )
 
@@ -735,19 +1031,33 @@ class CallAnalyticsDashboard:
                     #     outputs=[call_table, date_filter, category_filter, detail_html, transcript_text, page_num, pagination_info, current_total, current_df]
                     # )
 
-                # Tab 2: Statistics
+                # Tab 2: Statistics - 첫콜 vs 재콜 비교 분석 중심
                 with gr.Tab("📈 통계 분석", id="stats"):
+                    firstcall_stats = self._get_firstcall_stats()
                     gr.HTML(f"""
                     <div style="margin-bottom: 24px;">
-                        <h2 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 600; color: #1e293b;">통계 분석</h2>
-                        <p style="color: #64748b; margin: 0;">총 {stats.get('total_calls', 0)}건의 통화 데이터 분석 결과</p>
+                        <h2 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 600; color: #1e293b;">📊 첫콜 vs 재콜 비교 분석</h2>
+                        <p style="color: #64748b; margin: 0;">총 {stats.get('total_calls', 0)}건 (첫콜 {firstcall_stats['firstcall']}건 / 재콜 {firstcall_stats['repeat']}건)</p>
                     </div>
                     """)
 
+                    # Row 1: 첫콜/재콜 비율 + 일자별 추이
                     with gr.Row():
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">📊 카테고리별 분포</h3>')
-                            category_chart = gr.Plot(value=self.create_category_chart())
+                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">🥧 첫콜/재콜 비율</h3>')
+                            firstcall_pie_chart = gr.Plot(value=self.create_firstcall_comparison_chart())
+                            gr.HTML('</div>')
+
+                        with gr.Column():
+                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">📈 일자별 추이</h3>')
+                            daily_trend_chart = gr.Plot(value=self.create_daily_trend_chart())
+                            gr.HTML('</div>')
+
+                    # Row 2: 카테고리별 비교 + 카테고리 상세
+                    with gr.Row():
+                        with gr.Column():
+                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">📊 카테고리별 비교</h3>')
+                            category_comparison_chart = gr.Plot(value=self.create_category_comparison_chart())
                             gr.HTML('</div>')
 
                         with gr.Column():
@@ -755,15 +1065,16 @@ class CallAnalyticsDashboard:
                             sunburst_chart = gr.Plot(value=self.create_category_sunburst())
                             gr.HTML('</div>')
 
+                    # Row 3: 감정 비교 + 해결률 비교
                     with gr.Row():
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">😊 감정 분포</h3>')
-                            sentiment_chart = gr.Plot(value=self.create_sentiment_chart())
+                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">😊 감정 분포 비교</h3>')
+                            sentiment_comparison_chart = gr.Plot(value=self.create_sentiment_comparison_chart())
                             gr.HTML('</div>')
 
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">✅ 해결 현황</h3>')
-                            resolution_chart = gr.Plot(value=self.create_resolution_chart())
+                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">✅ 해결률 비교</h3>')
+                            resolution_comparison_chart = gr.Plot(value=self.create_resolution_comparison_chart())
                             gr.HTML('</div>')
 
                     refresh_stats_btn = gr.Button("🔄 통계 새로고침", variant="secondary", elem_classes="secondary-btn")
@@ -771,15 +1082,18 @@ class CallAnalyticsDashboard:
                     def refresh_stats():
                         self.data_cache.clear()
                         return (
-                            self.create_category_chart(),
+                            self.create_firstcall_comparison_chart(),
+                            self.create_daily_trend_chart(),
+                            self.create_category_comparison_chart(),
                             self.create_category_sunburst(),
-                            self.create_sentiment_chart(),
-                            self.create_resolution_chart()
+                            self.create_sentiment_comparison_chart(),
+                            self.create_resolution_comparison_chart()
                         )
 
                     refresh_stats_btn.click(
                         fn=refresh_stats,
-                        outputs=[category_chart, sunburst_chart, sentiment_chart, resolution_chart]
+                        outputs=[firstcall_pie_chart, daily_trend_chart, category_comparison_chart,
+                                sunburst_chart, sentiment_comparison_chart, resolution_comparison_chart]
                     )
 
                 # Tab 3: Cost Analysis (별도 모듈에서 관리)
@@ -798,15 +1112,53 @@ class CallAnalyticsDashboard:
                     categories_html = ""
                     try:
                         with open(categories_path, 'r', encoding='utf-8') as f:
-                            categories = json.load(f)
+                            categories_data = json.load(f)
 
                         categories_items = []
-                        for main_cat, sub_cats in categories.items():
-                            sub_items = []
-                            for sub_cat, details in sub_cats.items():
-                                detail_tags = ' '.join([f'<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px;">{d}</span>' for d in details])
-                                sub_items.append(f'<div style="margin-left: 20px; margin-bottom: 8px;"><strong style="color: #475569;">{sub_cat}</strong><div style="margin-top: 4px;">{detail_tags}</div></div>')
-                            categories_items.append(f'<div style="margin-bottom: 16px;"><div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 8px;">📂 {main_cat}</div>{"".join(sub_items)}</div>')
+                        # 새 구조: {"_metadata": ..., "분류체계": {...}, ...}
+                        if "분류체계" in categories_data:
+                            categories = categories_data["분류체계"]
+                            for main_cat, cat_info in categories.items():
+                                sub_items = []
+                                desc = cat_info.get("description", "")
+
+                                # 문의유형 표시
+                                inquiry_types = cat_info.get("문의유형", {})
+                                if inquiry_types:
+                                    inquiry_tags = ' '.join([
+                                        f'<span style="background: #dbeafe; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px;">{k}</span>'
+                                        for k in inquiry_types.keys()
+                                    ])
+                                    sub_items.append(f'<div style="margin-left: 20px; margin-bottom: 8px;"><strong style="color: #475569;">문의유형</strong><div style="margin-top: 4px;">{inquiry_tags}</div></div>')
+
+                                # 상품유형 표시
+                                product_types = cat_info.get("상품유형", {})
+                                if product_types:
+                                    for prod_cat, prod_list in product_types.items():
+                                        if isinstance(prod_list, list):
+                                            prod_tags = ' '.join([
+                                                f'<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px;">{p}</span>'
+                                                for p in prod_list
+                                            ])
+                                            sub_items.append(f'<div style="margin-left: 20px; margin-bottom: 8px;"><strong style="color: #64748b; font-size: 13px;">{prod_cat}</strong><div style="margin-top: 4px;">{prod_tags}</div></div>')
+
+                                desc_html = f'<div style="color: #64748b; font-size: 13px; margin-bottom: 8px;">{desc}</div>' if desc else ''
+                                categories_items.append(f'<div style="margin-bottom: 16px;"><div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">📂 {main_cat}</div>{desc_html}{"".join(sub_items)}</div>')
+                        else:
+                            # 기존 구조 호환: {"카테고리": ["서브1", "서브2"]}
+                            for main_cat, sub_cats in categories_data.items():
+                                if main_cat.startswith("_"):
+                                    continue
+                                sub_items = []
+                                if isinstance(sub_cats, dict):
+                                    for sub_cat, details in sub_cats.items():
+                                        if isinstance(details, list):
+                                            detail_tags = ' '.join([f'<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px;">{d}</span>' for d in details])
+                                        else:
+                                            detail_tags = f'<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px;">{details}</span>'
+                                        sub_items.append(f'<div style="margin-left: 20px; margin-bottom: 8px;"><strong style="color: #475569;">{sub_cat}</strong><div style="margin-top: 4px;">{detail_tags}</div></div>')
+                                categories_items.append(f'<div style="margin-bottom: 16px;"><div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 8px;">📂 {main_cat}</div>{"".join(sub_items)}</div>')
+
                         categories_html = "".join(categories_items)
                     except Exception as e:
                         categories_html = f'<p style="color: #ef4444;">카테고리 파일 로드 실패: {e}</p>'
@@ -878,7 +1230,7 @@ class CallAnalyticsDashboard:
                             <div style="max-width: 800px;">
                                 <div class="chart-container">
                                     <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">🏷️ 카테고리 분류 체계</h3>
-                                    <div style="max-height: 500px; overflow-y: auto; padding: 12px; background: #f8fafc; border-radius: 8px;">
+                                    <div style="max-height: 1000px; overflow-y: auto; padding: 12px; background: #f8fafc; border-radius: 8px;">
                                         {categories_html}
                                     </div>
                                 </div>
