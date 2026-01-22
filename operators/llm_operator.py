@@ -15,76 +15,155 @@ INVALID_PATTERNS = [
     "키워드1",
     "키워드2",
     "필요한 후속 조치",
+    "<실제",  # 템플릿 placeholder 감지
+    "<위 목록",
+    "<핵심",
+    "<후속",
 ]
+
+# 새 분류 체계 (LLM 프롬프트용 간결 버전)
+CATEGORY_SCHEMA = {
+    "대분류": {
+        "인터넷": "인터넷/TV 가입 (KT, SK, LG, SkyLife, LG헬로비전, 딜라이브, HCN)",
+        "가전렌탈": "정수기, 공기청정기, 비데, 에어컨, TV, 안마의자 등 렌탈",
+        "휴대폰": "SKT/KT/LG 휴대폰 구매/개통 (아이폰, 갤럭시, 폴드, 플립)",
+        "알뜰폰": "알뜰폰(MVNO) 요금제, 유심",
+        "이사": "이사 서비스 (원매칭, 역경매, 포장이사)",
+        "청소": "입주청소, 이사청소, 정기청소",
+        "카드": "제휴카드 발급/혜택",
+        "부동산": "부동산 매매/전세/월세 중개",
+        "인테리어": "인테리어 시공",
+        "상조": "상조 서비스",
+        "매장패키지": "카페/음식점/편의점 창업 패키지",
+        "쇼핑적립": "쇼핑 적립 서비스",
+        "기타": "일반문의, 오프라인매장, 중고폰매입, 타사연결"
+    },
+    "문의유형": {
+        "신규가입": "처음 가입/신청",
+        "약정만료": "약정 종료 후 재가입/갱신",
+        "재약정": "동일 업체 약정 연장",
+        "기기변경": "동일 통신사 기기 변경",
+        "번호이동": "타 통신사에서 이동",
+        "견적비교": "가격/조건 비교",
+        "견적요청": "서비스 견적 신청",
+        "요금문의": "요금제, 납부금액",
+        "요금제변경": "요금제 변경",
+        "이전설치": "이사로 서비스 이전",
+        "결합문의": "여러 상품 결합",
+        "설치일정": "설치/철거 일정",
+        "A/S": "고장, 수리, 장애",
+        "사은품": "사은품/지원금",
+        "해지/취소": "서비스 해지, 신청 취소",
+        "상품변경": "이용 중 상품 변경",
+        "필터/소모품": "필터 배송, 소모품",
+        "유심발송": "유심 배송",
+        "클레임": "서비스 불만족 민원",
+        "서비스문의": "서비스 내용/범위",
+        "혜택문의": "혜택/이벤트 안내",
+        "일반문의": "아정당 일반 문의",
+        "오프라인매장": "매장 위치/운영시간",
+        "중고폰매입": "중고폰 판매/매입",
+        "타사연결": "타업체 연결 요청"
+    },
+    "상태": {
+        "신규접수": "새로운 문의 접수",
+        "기접수건": "이미 접수된 건 재문의",
+        "기가입건": "이미 가입된 건 재문의",
+        "처리완료": "상담 완료",
+        "콜백예정": "재연락 예정",
+        "이관": "타 부서/업체 이관"
+    },
+    "특이사항": [
+        "리턴즈고객", "위약금면제대상", "긴급설치", "VIP고객",
+        "신혼부부혜택", "단기계약", "사업자", "결합상품",
+        "설치불가지역", "통화품질불량", "욕설/불량고객"
+    ],
+    "상품유형_예시": {
+        "인터넷": ["KT", "SK브로드밴드", "LG유플러스", "SkyLife", "LG헬로비전"],
+        "가전렌탈": ["정수기", "공기청정기", "비데", "에어컨", "냉난방기", "TV", "안마의자", "세탁기", "건조기", "스타일러", "냉장고", "인덕션", "펫케어"],
+        "휴대폰": ["아이폰", "갤럭시", "갤럭시폴드", "갤럭시플립"],
+        "알뜰폰": ["데이터무제한", "음성무제한", "시니어요금제"],
+        "청소": ["입주청소", "이사청소", "정기청소"],
+        "이사": ["포장이사", "반포장이사", "원매칭", "역경매"]
+    }
+}
+
+# 유효값 목록 (검증용)
+VALID_CATEGORIES = list(CATEGORY_SCHEMA["대분류"].keys())
+VALID_INQUIRY_TYPES = list(CATEGORY_SCHEMA["문의유형"].keys())
+VALID_STATUS = list(CATEGORY_SCHEMA["상태"].keys())
+VALID_TAGS = CATEGORY_SCHEMA["특이사항"]
+
 
 class CallAnalyzer:
     def __init__(self, base_url=None, model=None):
-        # config.yaml에서 설정 로드
         config = get_config().get_llm_config()
         self.base_url = base_url or config.get('base_url', 'http://localhost:11434')
         self.model = model or config.get('model', 'llama3.3:70b')
-        self.temperature = config.get('temperature', 0.7)
+        self.temperature = config.get('temperature', 0.3)  # 분류 작업은 낮은 temperature
 
-        # Invalid 결과 로그 경로
         self.invalid_log_path = Path(get_config().get('paths.log_dir', 'logs')) / 'invalid_results.jsonl'
         self.invalid_log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def summarize(self, conversation: list[dict], call_id: str = None) -> dict:
         """통화 요약 + 카테고라이징"""
 
-        # 대화 텍스트 포맷팅
+        # 빈 대화 처리
+        if not conversation or len(conversation) == 0:
+            print(f"    ⚠ 빈 대화 - 기본값 반환")
+            return {
+                "summary": "(대화 내용 없음)",
+                "category": "기타",
+                "inquiry_type": "일반문의",
+                "sub_category": "일반문의",
+                "status": "신규접수",
+                "tags": [],
+                "customer_intent": "(확인 불가)",
+                "resolution": "진행중",
+                "sentiment": "중립",
+                "keywords": [],
+                "action_required": None,
+                "_valid": True,
+                "_empty_conversation": True
+            }
+
         dialogue = "\n".join([
             f"[{turn['speaker']}] {turn['text']}"
             for turn in conversation
         ])
 
-        # 카테고리 파일 로드
-        categories_path = get_config().get('paths.categories_file', 'categories.json')
-        with open(categories_path, 'r', encoding='utf-8') as f:
-            categories_data = json.load(f)
+        # 대화가 너무 짧은 경우
+        if len(dialogue.strip()) < 20:
+            print(f"    ⚠ 대화가 너무 짧음 ({len(dialogue)}자) - 기본값 반환")
+            return {
+                "summary": "(대화 내용 부족)",
+                "category": "기타",
+                "inquiry_type": "일반문의",
+                "sub_category": "일반문의",
+                "status": "신규접수",
+                "tags": [],
+                "customer_intent": "(확인 불가)",
+                "resolution": "진행중",
+                "sentiment": "중립",
+                "keywords": [],
+                "action_required": None,
+                "_valid": True,
+                "_short_conversation": True
+            }
 
-        prompt = f"""다음은 고객센터 통화 녹취록입니다. 실제 통화 내용을 분석하여 응답해주세요.
-
-## 통화 내용
-{dialogue}
-
-## 허용된 카테고리 목록 (반드시 아래 목록의 값만 사용할 것)
-{json.dumps(categories_data, ensure_ascii=False, indent=2)}
-
-## 중요 규칙
-1. category와 sub_category는 **위 목록에 정확히 있는 값**만 사용
-2. 목록에 없는 값 생성 금지
-3. 적절한 카테고리가 없으면 "기타" > "일반문의" 선택
-4. 한국어로만 응답
-5. resolution은 반드시 "해결됨", "진행중", "후속조치필요" 중 하나만 선택
-6. sentiment는 반드시 "긍정", "중립", "부정" 중 하나만 선택
-7. summary는 실제 통화 내용을 기반으로 구체적으로 작성
-
-## 응답 형식
-아래 JSON 형식으로 응답하되, 각 필드에 실제 분석 결과를 입력하세요:
-```json
-{{
-    "summary": "<실제 통화 내용을 3줄로 요약>",
-    "category": "<위 목록에서 선택한 주요 카테고리>",
-    "sub_category": "<위 목록에서 선택한 세부 카테고리>",
-    "customer_intent": "<고객이 전화한 실제 목적>",
-    "resolution": "<해결됨 또는 진행중 또는 후속조치필요>",
-    "sentiment": "<긍정 또는 중립 또는 부정>",
-    "keywords": ["<핵심키워드1>", "<핵심키워드2>", "<핵심키워드3>"],
-    "action_required": "<후속 조치 내용 또는 null>"
-}}
-```
-
-JSON만 출력하고 다른 설명은 하지 마세요."""
+        prompt = self._build_prompt(dialogue)
 
         response = requests.post(
             f"{self.base_url}/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False}
+            json={
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": self.temperature}
+            }
         )
 
         result = self._parse_response(response.json()["response"])
-
-        # 검증 수행
         is_valid, invalid_reason = self._validate_response(result)
         result["_valid"] = is_valid
 
@@ -92,56 +171,150 @@ JSON만 출력하고 다른 설명은 하지 마세요."""
             result["_invalid_reason"] = invalid_reason
             self._log_invalid_result(call_id, result, dialogue)
 
+        # 대시보드 호환: inquiry_type → sub_category 매핑
+        if "inquiry_type" in result:
+            result["sub_category"] = result["inquiry_type"]
+
         return result
+
+    def _build_prompt(self, dialogue: str) -> str:
+        """분류용 프롬프트 생성"""
+        
+        return f"""당신은 아정당 고객센터 통화를 분류하는 전문가입니다.
+
+## 통화 내용
+{dialogue}
+
+## 분류 체계
+
+### 대분류 (category) - 반드시 아래 중 하나 선택:
+{json.dumps(CATEGORY_SCHEMA["대분류"], ensure_ascii=False, indent=2)}
+
+### 문의유형 (inquiry_type) - 반드시 아래 중 하나 선택:
+{json.dumps(CATEGORY_SCHEMA["문의유형"], ensure_ascii=False, indent=2)}
+
+### 상태 (status) - 반드시 아래 중 하나 선택:
+{json.dumps(CATEGORY_SCHEMA["상태"], ensure_ascii=False, indent=2)}
+
+### 상품유형 예시 (product_type):
+{json.dumps(CATEGORY_SCHEMA["상품유형_예시"], ensure_ascii=False, indent=2)}
+
+### 특이사항 태그 (tags) - **아래 목록에서만** 해당하는 것 선택:
+{json.dumps(VALID_TAGS, ensure_ascii=False)}
+⚠️ 주의: "사은품", "번호이동", "요금제변경" 등은 문의유형이며, 태그가 아닙니다!
+
+## 분류 규칙
+1. category, inquiry_type, status는 위 목록의 **정확한 키값**만 사용
+2. product_type은 통화에서 언급된 구체적 상품/통신사명 (없으면 null)
+3. 적합한 분류가 없으면 category="기타", inquiry_type="일반문의"
+4. **복합 문의** (예: 인터넷+렌탈): 주요 문의 대분류 1개만 선택하고, tags에 "결합상품" 추가
+5. **tags는 위 특이사항 목록에서만 선택**, 해당사항 없으면 빈 배열 []
+6. resolution: "해결됨", "진행중", "후속조치필요" 중 택1 (다른 값 금지)
+7. sentiment: "긍정", "중립", "부정" 중 택1
+
+## 출력 형식 (JSON만 출력, 설명 금지)
+```json
+{{
+    "summary": "통화 내용 2-3문장 요약",
+    "category": "대분류값",
+    "product_type": "상품/통신사명 또는 null",
+    "inquiry_type": "문의유형값",
+    "status": "상태값",
+    "tags": ["해당태그"],
+    "customer_intent": "고객의 구체적 요청사항",
+    "resolution": "해결됨/진행중/후속조치필요",
+    "sentiment": "긍정/중립/부정",
+    "keywords": ["키워드1", "키워드2", "키워드3"],
+    "action_required": "필요한 후속조치 또는 null"
+}}
+```"""
 
     def _parse_response(self, text: str) -> dict:
         try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            return json.loads(text[start:end])
-        except:
-            return {"raw_response": text, "parse_error": True, "_valid": False}
+            # JSON 블록 추출
+            if "```json" in text:
+                start = text.find("```json") + 7
+                end = text.find("```", start)
+                text = text[start:end].strip()
+            elif "```" in text:
+                start = text.find("```") + 3
+                end = text.find("```", start)
+                text = text[start:end].strip()
+            else:
+                start = text.find("{")
+                end = text.rfind("}") + 1
+                text = text[start:end]
+            
+            return json.loads(text)
+        except Exception as e:
+            return {"raw_response": text, "parse_error": True, "_valid": False, "_error": str(e)}
 
     def _validate_response(self, result: dict) -> tuple[bool, str]:
-        """응답이 유효한지 검증"""
+        """응답 검증"""
         if result.get("parse_error"):
             return False, "JSON 파싱 실패"
 
-        # 템플릿 값이 그대로 사용되었는지 확인
-        for field in ["summary", "category", "sub_category", "customer_intent", "resolution", "sentiment"]:
-            value = result.get(field, "")
-            if isinstance(value, str):
-                for pattern in INVALID_PATTERNS:
-                    if pattern in value:
-                        return False, f"템플릿 값 감지: {field}={value}"
-
-        # keywords 검증
-        keywords = result.get("keywords", [])
-        if isinstance(keywords, list):
-            for kw in keywords:
-                if kw in INVALID_PATTERNS:
-                    return False, f"템플릿 키워드 감지: {kw}"
+        # 템플릿 패턴 감지
+        for field in ["summary", "category", "inquiry_type", "customer_intent"]:
+            value = str(result.get(field, ""))
+            for pattern in INVALID_PATTERNS:
+                if pattern in value:
+                    return False, f"템플릿 값 감지: {field}={value[:50]}"
 
         # 필수 필드 검증
-        required_fields = ["summary", "category", "sub_category", "resolution", "sentiment"]
-        for field in required_fields:
+        required = ["summary", "category", "inquiry_type", "status", "resolution", "sentiment"]
+        for field in required:
             if not result.get(field):
                 return False, f"필수 필드 누락: {field}"
 
-        # resolution 값 검증
-        valid_resolutions = ["해결됨", "진행중", "후속조치필요"]
-        if result.get("resolution") not in valid_resolutions:
-            return False, f"잘못된 resolution 값: {result.get('resolution')}"
+        # category 유효성
+        if result.get("category") not in VALID_CATEGORIES:
+            return False, f"잘못된 category: {result.get('category')} (허용: {VALID_CATEGORIES})"
 
-        # sentiment 값 검증
-        valid_sentiments = ["긍정", "중립", "부정"]
-        if result.get("sentiment") not in valid_sentiments:
-            return False, f"잘못된 sentiment 값: {result.get('sentiment')}"
+        # inquiry_type 유효성
+        if result.get("inquiry_type") not in VALID_INQUIRY_TYPES:
+            return False, f"잘못된 inquiry_type: {result.get('inquiry_type')}"
+
+        # status 유효성
+        if result.get("status") not in VALID_STATUS:
+            return False, f"잘못된 status: {result.get('status')}"
+
+        # resolution 검증 및 자동 보정
+        resolution = result.get("resolution", "")
+        valid_resolutions = ["해결됨", "진행중", "후속조치필요"]
+        if resolution not in valid_resolutions:
+            # 유사값 자동 매핑
+            resolution_map = {
+                "처리완료": "해결됨",
+                "완료": "해결됨",
+                "미해결": "진행중",
+                "대기중": "진행중",
+                "후속조치": "후속조치필요",
+                "콜백필요": "후속조치필요",
+            }
+            if resolution in resolution_map:
+                print(f"    ℹ resolution 자동 보정: {resolution} → {resolution_map[resolution]}")
+                result["resolution"] = resolution_map[resolution]
+            else:
+                return False, f"잘못된 resolution: {resolution}"
+
+        # sentiment 검증
+        if result.get("sentiment") not in ["긍정", "중립", "부정"]:
+            return False, f"잘못된 sentiment: {result.get('sentiment')}"
+
+        # tags 검증 (선택 필드) - 잘못된 태그는 제거하고 계속 진행
+        tags = result.get("tags", [])
+        if tags and isinstance(tags, list):
+            valid_tags = [tag for tag in tags if tag in VALID_TAGS]
+            invalid_tags = [tag for tag in tags if tag not in VALID_TAGS]
+            if invalid_tags:
+                print(f"    ℹ 유효하지 않은 태그 제거됨: {invalid_tags}")
+            result["tags"] = valid_tags  # 유효한 태그만 유지
 
         return True, None
 
     def _log_invalid_result(self, call_id: str, result: dict, dialogue: str):
-        """잘못된 결과를 로그 파일에 기록"""
+        """잘못된 결과 로깅"""
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "call_id": call_id,
@@ -154,3 +327,17 @@ JSON만 출력하고 다른 설명은 하지 마세요."""
             f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
         print(f"    ⚠ Invalid result logged: {result.get('_invalid_reason')}")
+
+
+# 기존 코드 호환용 wrapper (sub_category → inquiry_type 매핑)
+class CallAnalyzerCompat(CallAnalyzer):
+    """기존 category/sub_category 구조와 호환되는 버전"""
+    
+    def summarize(self, conversation: list[dict], call_id: str = None) -> dict:
+        result = super().summarize(conversation, call_id)
+        
+        # 기존 필드명 호환
+        if "_valid" in result and result["_valid"]:
+            result["sub_category"] = result.get("inquiry_type")
+        
+        return result
