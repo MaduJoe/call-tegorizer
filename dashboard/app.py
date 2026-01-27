@@ -1,6 +1,7 @@
 import gradio as gr
 import json
 import base64
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from collections import Counter
@@ -12,13 +13,79 @@ from .cost_analysis_tab import CostAnalysisTab
 class CallAnalyticsDashboard:
     """Modern SaaS-style Call Analytics Dashboard"""
 
+    # 인덱스 캐시에 저장할 필드 (transcript 제외)
+    INDEX_FIELDS = ['call_id', 'date', 'analysis', '_file_path']
+
     def __init__(self, output_dir: str = None):
         config = get_config()
         self.output_dir = Path(output_dir or config.get('paths.output_dir'))
         self.data_cache = {}
         self.page_size = 10
         self.current_page = 0
+
+        # 인덱스 캐시 파일 경로
+        self.index_cache_path = self.output_dir / '.call_index_cache.json'
+        self.index_cache = self._load_index_cache()
+
         self.firstcall_data = self._load_firstcall_data()
+
+    def _load_index_cache(self) -> dict:
+        """인덱스 캐시 파일 로드"""
+        if self.index_cache_path.exists():
+            try:
+                with open(self.index_cache_path, 'r', encoding='utf-8') as f:
+                    cache = json.load(f)
+                    print(f"✓ 인덱스 캐시 로드: {len(cache.get('files', {}))}건")
+                    return cache
+            except Exception as e:
+                print(f"인덱스 캐시 로드 실패: {e}")
+        return {'files': {}, 'metadata': {}}
+
+    def _save_index_cache(self):
+        """인덱스 캐시 파일 저장"""
+        try:
+            self.index_cache['metadata']['last_updated'] = time.time()
+            self.index_cache['metadata']['total_count'] = len(self.index_cache.get('files', {}))
+            with open(self.index_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(self.index_cache, f, ensure_ascii=False)
+            print(f"✓ 인덱스 캐시 저장: {self.index_cache['metadata']['total_count']}건")
+        except Exception as e:
+            print(f"인덱스 캐시 저장 실패: {e}")
+
+    def _extract_index_data(self, data: dict, file_path: str) -> dict:
+        """전체 데이터에서 인덱스용 메타데이터만 추출 (transcript 제외)"""
+        index_data = {
+            'call_id': data.get('call_id'),
+            'date': data.get('date'),
+            'analysis': data.get('analysis', {}),  # transcript 제외
+            '_file_path': file_path,
+        }
+        return index_data
+
+    def _load_transcript(self, file_path: str) -> list:
+        """원본 JSON 파일에서 transcript만 로드 (Lazy Loading)"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('transcript', {}).get('merged', [])
+        except Exception as e:
+            print(f"transcript 로드 실패: {file_path} - {e}")
+            return []
+
+    def refresh_cache(self, force: bool = False):
+        """캐시 새로고침 (force=True면 전체 재구축)"""
+        if force:
+            # 캐시 파일 삭제 후 재구축
+            if self.index_cache_path.exists():
+                self.index_cache_path.unlink()
+            self.index_cache = {'files': {}, 'metadata': {}}
+            print("캐시 강제 초기화")
+
+        # 메모리 캐시 클리어
+        self.data_cache.clear()
+
+        # 데이터 다시 로드 (증분 로드)
+        return self.load_all_calls()
 
     def _load_firstcall_data(self) -> dict:
         """Excel에서 첫콜 데이터 로드 - {day: {filename: is_firstcall}}"""
@@ -89,39 +156,92 @@ class CallAnalyticsDashboard:
         return True
 
     def load_all_calls(self) -> List[Dict[str, Any]]:
-        """Load all call data (valid only, 날짜 오름차순 정렬)"""
+        """Load all call data with incremental indexing (증분 로드)"""
         if 'all_calls' in self.data_cache:
             return self.data_cache['all_calls']
 
-        all_calls = []
-        invalid_count = 0
+        start_time = time.time()
+        cached_files = self.index_cache.get('files', {})
+
+        # 현재 존재하는 모든 JSON 파일 스캔
+        current_files = {}
         for json_file in self.output_dir.rglob("*.json"):
-            # .transcript.json 파일은 제외 (STT 중간 결과물)
             if json_file.name.endswith('.transcript.json'):
                 continue
+            if json_file.name.startswith('.'):  # 숨김 파일 제외
+                continue
+            file_path = str(json_file)
+            mtime = json_file.stat().st_mtime
+            current_files[file_path] = mtime
+
+        # 증분 로드: 새 파일 또는 수정된 파일만 읽기
+        new_count = 0
+        updated_count = 0
+        removed_count = 0
+
+        # 삭제된 파일 제거
+        for file_path in list(cached_files.keys()):
+            if file_path not in current_files:
+                del cached_files[file_path]
+                removed_count += 1
+
+        # 새 파일/수정된 파일 로드
+        for file_path, mtime in current_files.items():
+            cached = cached_files.get(file_path)
+
+            # 캐시에 있고 수정 시간이 같으면 스킵
+            if cached and cached.get('mtime') == mtime:
+                continue
+
+            # 새 파일 또는 수정된 파일 로드
             try:
-                with open(json_file, 'r', encoding='utf-8') as f:
+                with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    data['_file_path'] = str(json_file)
-                    data['_full_call_id'] = data.get('call_id', 'N/A')
 
-                    # 유효한 데이터만 추가
-                    if self._is_valid_call(data):
-                        # 첫콜 여부 추가
-                        call_id = data.get('call_id', '')
-                        date = data.get('date', '')
-                        data['_is_firstcall'] = self._get_is_firstcall(call_id, date)
-                        all_calls.append(data)
-                    else:
-                        invalid_count += 1
+                # 유효성 검사
+                if not self._is_valid_call(data):
+                    continue
+
+                # 인덱스 데이터 추출 (transcript 제외)
+                index_data = self._extract_index_data(data, file_path)
+
+                if file_path in cached_files:
+                    updated_count += 1
+                else:
+                    new_count += 1
+
+                cached_files[file_path] = {
+                    'mtime': mtime,
+                    'data': index_data
+                }
             except Exception as e:
-                print(f"Error loading {json_file}: {e}")
+                print(f"Error loading {file_path}: {e}")
 
-        if invalid_count > 0:
-            print(f"Filtered out {invalid_count} invalid call records")
+        # 캐시 저장 (변경이 있을 때만)
+        if new_count > 0 or updated_count > 0 or removed_count > 0:
+            self.index_cache['files'] = cached_files
+            self._save_index_cache()
+            print(f"  증분 로드: +{new_count} 신규, ~{updated_count} 수정, -{removed_count} 삭제")
 
-        # 날짜 기준 오름차순 정렬 (01/02 -> 01/05 순서)
+        # 캐시에서 all_calls 구성
+        all_calls = []
+        for file_path, cached in cached_files.items():
+            data = cached.get('data', {})
+            data['_file_path'] = file_path
+            data['_full_call_id'] = data.get('call_id', 'N/A')
+
+            # 첫콜 여부 추가
+            call_id = data.get('call_id', '')
+            date = data.get('date', '')
+            data['_is_firstcall'] = self._get_is_firstcall(call_id, date)
+
+            all_calls.append(data)
+
+        # 날짜 기준 오름차순 정렬
         all_calls.sort(key=lambda x: x.get('date', '99/99'))
+
+        elapsed = time.time() - start_time
+        print(f"✓ 데이터 로드 완료: {len(all_calls)}건 ({elapsed:.2f}초)")
 
         self.data_cache['all_calls'] = all_calls
         return all_calls
@@ -276,8 +396,10 @@ class CallAnalyticsDashboard:
             return self._empty_detail_html(), ""
 
         analysis = call.get('analysis', {})
-        transcript = call.get('transcript', {})
-        merged = transcript.get('merged', [])
+
+        # Lazy Loading: transcript는 원본 파일에서 로드
+        file_path = call.get('_file_path', '')
+        merged = self._load_transcript(file_path) if file_path else []
 
         # Sentiment badge
         sentiment = analysis.get('sentiment', 'N/A')
@@ -430,12 +552,22 @@ class CallAnalyticsDashboard:
             )
         return fig
 
-    def create_category_sunburst(self):
-        """카테고리 Sunburst 차트 (계층 구조)"""
+    def create_category_sunburst(self, call_type_filter: str = "전체"):
+        """카테고리 Sunburst 차트 (계층 구조)
+
+        Args:
+            call_type_filter: "전체", "첫콜", "재콜" 중 선택
+        """
         calls = self.load_all_calls()
         if not calls:
             fig = px.sunburst(title="데이터 없음")
             return fig
+
+        # 첫콜/재콜 필터 적용
+        if call_type_filter == "첫콜":
+            calls = [c for c in calls if c.get('_is_firstcall') is True]
+        elif call_type_filter == "재콜":
+            calls = [c for c in calls if c.get('_is_firstcall') is False]
 
         # 카테고리 → 세부 카테고리 계층 데이터 구성
         hierarchy_data = []
@@ -1117,6 +1249,13 @@ class CallAnalyticsDashboard:
 
                         with gr.Column():
                             gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">🌐 카테고리 상세</h3><p style="color: #64748b; font-size: 13px; margin-top: 4px;">클릭하여 세부 카테고리 확인</p>')
+                            sunburst_filter = gr.Radio(
+                                choices=["전체", "첫콜", "재콜"],
+                                value="전체",
+                                label="",
+                                elem_classes="firstcall-toggle",
+                                container=False
+                            )
                             sunburst_chart = gr.Plot(value=self.create_category_sunburst())
                             gr.HTML('</div>')
 
@@ -1134,21 +1273,29 @@ class CallAnalyticsDashboard:
 
                     refresh_stats_btn = gr.Button("🔄 통계 새로고침", variant="secondary", elem_classes="secondary-btn")
 
-                    def refresh_stats():
+                    def refresh_stats(sunburst_call_type):
                         self.data_cache.clear()
                         return (
                             self.create_firstcall_comparison_chart(),
                             self.create_daily_trend_chart(),
                             self.create_category_comparison_chart(),
-                            self.create_category_sunburst(),
+                            self.create_category_sunburst(sunburst_call_type),
                             self.create_sentiment_comparison_chart(),
                             self.create_resolution_comparison_chart()
                         )
 
                     refresh_stats_btn.click(
                         fn=refresh_stats,
+                        inputs=[sunburst_filter],
                         outputs=[firstcall_pie_chart, daily_trend_chart, category_comparison_chart,
                                 sunburst_chart, sentiment_comparison_chart, resolution_comparison_chart]
+                    )
+
+                    # Sunburst 차트 첫콜/재콜 필터
+                    sunburst_filter.change(
+                        fn=self.create_category_sunburst,
+                        inputs=[sunburst_filter],
+                        outputs=[sunburst_chart]
                     )
 
                 # Tab 3: Cost Analysis (별도 모듈에서 관리)
@@ -1170,61 +1317,77 @@ class CallAnalyticsDashboard:
                             categories_data = json.load(f)
 
                         categories_items = []
-                        # 새 구조: {"_metadata": ..., "분류체계": {...}, ...}
-                        if "분류체계" in categories_data:
-                            categories = categories_data["분류체계"]
-                            for main_cat, cat_info in categories.items():
+
+                        # 현재 구조: {"대분류": {...}, "문의유형": {...}, "상태": {...}, "특이사항": [...], "상품유형_예시": {...}}
+                        for section_name, section_data in categories_data.items():
+                            if section_name.startswith("_"):
+                                continue
+
+                            # 섹션 아이콘 매핑
+                            section_icons = {
+                                "대분류": "📁",
+                                "문의유형": "📋",
+                                "상태": "🔄",
+                                "특이사항": "🏷️",
+                                "상품유형_예시": "📦"
+                            }
+                            icon = section_icons.get(section_name, "📂")
+
+                            if isinstance(section_data, list):
+                                # 리스트 타입 (특이사항)
+                                tags = ' '.join([
+                                    f'<span style="background: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 12px; font-size: 12px; margin: 2px; display: inline-block;">{item}</span>'
+                                    for item in section_data
+                                ])
+                                categories_items.append(f'''
+                                    <div style="margin-bottom: 20px;">
+                                        <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 10px;">{icon} {section_name}</div>
+                                        <div style="margin-left: 10px; line-height: 2;">{tags}</div>
+                                    </div>
+                                ''')
+                            elif isinstance(section_data, dict):
+                                # 딕셔너리 타입 (대분류, 문의유형, 상태, 상품유형_예시)
                                 sub_items = []
-                                desc = cat_info.get("description", "")
+                                for key, value in section_data.items():
+                                    if isinstance(value, str):
+                                        # key: description 형태
+                                        sub_items.append(f'''
+                                            <div style="margin-left: 10px; margin-bottom: 6px; display: flex; align-items: baseline;">
+                                                <span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; min-width: 80px;">{key}</span>
+                                                <span style="color: #64748b; font-size: 13px; margin-left: 8px;">{value}</span>
+                                            </div>
+                                        ''')
+                                    elif isinstance(value, list):
+                                        # key: [item1, item2, ...] 형태 (상품유형_예시)
+                                        items_tags = ' '.join([
+                                            f'<span style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{item}</span>'
+                                            for item in value
+                                        ])
+                                        sub_items.append(f'''
+                                            <div style="margin-left: 10px; margin-bottom: 8px;">
+                                                <span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500;">{key}</span>
+                                                <div style="margin-top: 4px; margin-left: 10px; line-height: 1.8;">{items_tags}</div>
+                                            </div>
+                                        ''')
 
-                                # 문의유형 표시
-                                inquiry_types = cat_info.get("문의유형", {})
-                                if inquiry_types:
-                                    inquiry_tags = ' '.join([
-                                        f'<span style="background: #dbeafe; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px;">{k}</span>'
-                                        for k in inquiry_types.keys()
-                                    ])
-                                    sub_items.append(f'<div style="margin-left: 20px; margin-bottom: 8px;"><strong style="color: #475569;">문의유형</strong><div style="margin-top: 4px;">{inquiry_tags}</div></div>')
-
-                                # 상품유형 표시
-                                product_types = cat_info.get("상품유형", {})
-                                if product_types:
-                                    for prod_cat, prod_list in product_types.items():
-                                        if isinstance(prod_list, list):
-                                            prod_tags = ' '.join([
-                                                f'<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px;">{p}</span>'
-                                                for p in prod_list
-                                            ])
-                                            sub_items.append(f'<div style="margin-left: 20px; margin-bottom: 8px;"><strong style="color: #64748b; font-size: 13px;">{prod_cat}</strong><div style="margin-top: 4px;">{prod_tags}</div></div>')
-
-                                desc_html = f'<div style="color: #64748b; font-size: 13px; margin-bottom: 8px;">{desc}</div>' if desc else ''
-                                categories_items.append(f'<div style="margin-bottom: 16px;"><div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">📂 {main_cat}</div>{desc_html}{"".join(sub_items)}</div>')
-                        else:
-                            # 기존 구조 호환: {"카테고리": ["서브1", "서브2"]}
-                            for main_cat, sub_cats in categories_data.items():
-                                if main_cat.startswith("_"):
-                                    continue
-                                sub_items = []
-                                if isinstance(sub_cats, dict):
-                                    for sub_cat, details in sub_cats.items():
-                                        if isinstance(details, list):
-                                            detail_tags = ' '.join([f'<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px;">{d}</span>' for d in details])
-                                        else:
-                                            detail_tags = f'<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px;">{details}</span>'
-                                        sub_items.append(f'<div style="margin-left: 20px; margin-bottom: 8px;"><strong style="color: #475569;">{sub_cat}</strong><div style="margin-top: 4px;">{detail_tags}</div></div>')
-                                categories_items.append(f'<div style="margin-bottom: 16px;"><div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 8px;">📂 {main_cat}</div>{"".join(sub_items)}</div>')
+                                categories_items.append(f'''
+                                    <div style="margin-bottom: 20px;">
+                                        <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 10px;">{icon} {section_name}</div>
+                                        {"".join(sub_items)}
+                                    </div>
+                                ''')
 
                         categories_html = "".join(categories_items)
                     except Exception as e:
                         categories_html = f'<p style="color: #ef4444;">카테고리 파일 로드 실패: {e}</p>'
 
-                    gr.HTML('<h2 style="margin: 0 0 24px 0; font-size: 24px; font-weight: 600; color: #1e293b;">시스템 설정</h2>')
-
                     with gr.Row():
-                        # Left Column: STT, LLM, 경로 설정
+                        # Left Column: 시스템 설정 (STT, LLM, 경로)
                         with gr.Column(scale=1):
                             gr.HTML(f"""
-                            <div style="max-width: 800px;">
+                            <div>
+                                <h2 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 600; color: #1e293b;">⚙️ 시스템 설정</h2>
+
                                 <div class="chart-container" style="margin-bottom: 20px;">
                                     <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">🎤 STT (Speech-to-Text)</h3>
                                     <div class="info-grid">
@@ -1282,10 +1445,11 @@ class CallAnalyticsDashboard:
                         # Right Column: 카테고리 분류 체계
                         with gr.Column(scale=1):
                             gr.HTML(f"""
-                            <div style="max-width: 800px;">
+                            <div>
+                                <h2 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 600; color: #1e293b;">📂 카테고리 분류 체계</h2>
+
                                 <div class="chart-container">
-                                    <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">🏷️ 카테고리 분류 체계</h3>
-                                    <div style="max-height: 1000px; overflow-y: auto; padding: 12px; background: #f8fafc; border-radius: 8px;">
+                                    <div style="max-height: 1200px; overflow-y: auto; padding: 12px; background: #f8fafc; border-radius: 8px;">
                                         {categories_html}
                                     </div>
                                 </div>
