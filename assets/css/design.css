@@ -345,22 +345,22 @@ Header
 /* 5: 카테고리 */
 .data-table thead th:nth-child(5),
 .data-table tbody td:nth-child(5) {
-    width: 80px !important;
-    min-width: 80px !important;
-    max-width: 80px !important;
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
     box-sizing: border-box !important;
 }
 
 /* 6: 세부 */
 .data-table thead th:nth-child(6),
 .data-table tbody td:nth-child(6) {
-    width: 80px !important;
-    min-width: 80px !important;
-    max-width: 80px !important;
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
     box-sizing: border-box !important;
 }
 
-/* 7: 상태 */
+/* 7: 태그 */
 .data-table thead th:nth-child(7),
 .data-table tbody td:nth-child(7) {
     width: 100px !important;
@@ -369,18 +369,27 @@ Header
     box-sizing: border-box !important;
 }
 
-/* 8: 감정 */
+/* 8: 상태 */
 .data-table thead th:nth-child(8),
 .data-table tbody td:nth-child(8) {
-    width: 100px !important;
-    min-width: 100px !important;
-    max-width: 100px !important;
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
     box-sizing: border-box !important;
 }
 
-/* 9: 요약 - Flexible column takes remaining space */
+/* 9: 감정 */
 .data-table thead th:nth-child(9),
 .data-table tbody td:nth-child(9) {
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    box-sizing: border-box !important;
+}
+
+/* 10: 요약 - Flexible column takes remaining space */
+.data-table thead th:nth-child(10),
+.data-table tbody td:nth-child(10) {
     width: auto !important;
     min-width: 150px !important;
     white-space: normal !important;
@@ -1192,15 +1201,16 @@ body.dark .pagination-input input {
     display: table-column-group !important;
 }
 
-.data-table table colgroup col:nth-child(1) { width: 50px !important; }
-.data-table table colgroup col:nth-child(2) { width: 70px !important; }
-.data-table table colgroup col:nth-child(3) { width: 55px !important; }
-.data-table table colgroup col:nth-child(4) { width: 130px !important; }
-.data-table table colgroup col:nth-child(5) { width: 75px !important; }
-.data-table table colgroup col:nth-child(6) { width: 80px !important; }
-.data-table table colgroup col:nth-child(7) { width: 95px !important; }
-.data-table table colgroup col:nth-child(8) { width: 75px !important; }
-.data-table table colgroup col:nth-child(9) { width: auto !important; min-width: 150px !important; }
+.data-table table colgroup col:nth-child(1) { width: 50px !important; }   /* # */
+.data-table table colgroup col:nth-child(2) { width: 70px !important; }   /* 날짜 */
+.data-table table colgroup col:nth-child(3) { width: 55px !important; }   /* 첫콜 */
+.data-table table colgroup col:nth-child(4) { width: 130px !important; }  /* Call ID */
+.data-table table colgroup col:nth-child(5) { width: 75px !important; }   /* 카테고리 */
+.data-table table colgroup col:nth-child(6) { width: 80px !important; }   /* 세부 */
+.data-table table colgroup col:nth-child(7) { width: 100px !important; }  /* 태그 */
+.data-table table colgroup col:nth-child(8) { width: 80px !important; }   /* 상태 */
+.data-table table colgroup col:nth-child(9) { width: 80px !important; }   /* 감정 */
+.data-table table colgroup col:nth-child(10) { width: auto !important; min-width: 150px !important; }  /* 요약 */
 
 /* Ensure the parent column doesn't cause resize */
 .data-table + .pagination-bar {
