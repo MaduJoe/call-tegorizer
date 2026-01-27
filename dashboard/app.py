@@ -1,6 +1,5 @@
 import gradio as gr
 import json
-import base64
 import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -261,17 +260,17 @@ class CallAnalyticsDashboard:
             # Format sentiment with emoji
             sentiment = analysis.get('sentiment', 'N/A')
             sentiment_display = {
-                '긍정': '🟢긍정',
-                '부정': '🔴부정',
-                '중립': '⚪중립'
+                '긍정': '긍정',
+                '부정': '부정',
+                '중립': '중립'
             }.get(sentiment, sentiment)
 
             # Format resolution with emoji
             resolution = analysis.get('resolution', 'N/A')
             resolution_display = {
-                '해결됨': '✅해결됨',
-                '진행중': '⏳진행중',
-                '후속조치필요': '📋 후속조치'
+                '해결됨': '해결됨',
+                '진행중': '진행중',
+                '후속조치필요': '후속조치'
             }.get(resolution, resolution)
 
             # Format firstcall with emoji
@@ -543,12 +542,12 @@ class CallAnalyticsDashboard:
             fig.update_traces(textposition='outside')
             fig.update_layout(
                 showlegend=False,
-                # height=400,
-                # margin=dict(t=20, b=40),
                 height=530,
                 margin=dict(t=30, b=30, l=30, r=30),
                 xaxis_title="카테고리",
-                yaxis_title="건수"
+                yaxis_title="건수",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
             )
         return fig
 
@@ -614,6 +613,8 @@ class CallAnalyticsDashboard:
         fig.update_layout(
             height=500,
             margin=dict(t=30, b=30, l=30, r=30),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
         )
 
         return fig
@@ -640,7 +641,9 @@ class CallAnalyticsDashboard:
                 height=400,
                 margin=dict(t=20, b=40),
                 xaxis_title="",
-                yaxis_title="건수"
+                yaxis_title="건수",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
             )
         return fig
 
@@ -666,7 +669,9 @@ class CallAnalyticsDashboard:
                 height=400,
                 margin=dict(t=20, b=40),
                 xaxis_title="",
-                yaxis_title="건수"
+                yaxis_title="건수",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
             )
         return fig
 
@@ -690,7 +695,9 @@ class CallAnalyticsDashboard:
                 height=400,
                 margin=dict(t=30, b=30, l=30, r=30),
                 showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5)
+                legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
             )
         return fig
 
@@ -729,7 +736,9 @@ class CallAnalyticsDashboard:
             margin=dict(t=30, b=40, l=40, r=40),
             xaxis_title="카테고리",
             yaxis_title="건수",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
         )
         return fig
 
@@ -770,7 +779,9 @@ class CallAnalyticsDashboard:
             margin=dict(t=30, b=40, l=40, r=40),
             xaxis_title="날짜",
             yaxis_title="건수",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
         )
         return fig
 
@@ -817,7 +828,9 @@ class CallAnalyticsDashboard:
             xaxis_title="",
             yaxis_title="해결률 (%)",
             yaxis=dict(range=[0, 100]),
-            showlegend=False
+            showlegend=False,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
         )
         return fig
 
@@ -855,7 +868,9 @@ class CallAnalyticsDashboard:
             margin=dict(t=30, b=40, l=40, r=40),
             xaxis_title="",
             yaxis_title="건수",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
         )
         return fig
 
@@ -865,11 +880,6 @@ class CallAnalyticsDashboard:
         css_file = Path(__file__).parent.parent / "assets" / "css" / "design.css"
         with open(css_file, 'r', encoding='utf-8') as f:
             custom_css = f.read()
-
-        # Load logo as base64
-        logo_path = Path(__file__).parent.parent / "assets" / "imgs" / "calltegorizer-main.png"
-        with open(logo_path, "rb") as f:
-            logo_base64 = base64.b64encode(f.read()).decode("utf-8")
 
         # JavaScript for stat-card click → filter
         custom_js = """

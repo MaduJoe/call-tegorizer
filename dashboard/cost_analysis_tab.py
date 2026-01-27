@@ -180,7 +180,7 @@ class CostAnalysisTab:
 
         if selected_cost == 0:
             fig = px.pie(title="카테고리를 선택해주세요")
-            fig.update_layout(height=350, margin=dict(t=20, b=20))
+            fig.update_layout(height=350, margin=dict(t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         else:
             df = pd.DataFrame([
                 {'구분': '예상 절감액', '금액': potential_savings},
@@ -207,7 +207,9 @@ class CostAnalysisTab:
                     'x': 0.5, 'y': 0.5,
                     'font_size': 14,
                     'showarrow': False
-                }]
+                }],
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
             )
         return fig
 
@@ -251,7 +253,9 @@ class CostAnalysisTab:
                 margin=dict(t=20, b=40),
                 xaxis_title="",
                 yaxis_title="비용 (원)",
-                legend_title="구분"
+                legend_title="구분",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
             )
         return fig
 

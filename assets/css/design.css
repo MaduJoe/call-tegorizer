@@ -1328,3 +1328,107 @@ body.dark .pagination-input input {
     padding: 0 !important;
     padding-right: 0 !important;
 }
+
+/* ===== Dark Mode - Toggle Buttons ===== */
+.dark .firstcall-toggle-row,
+body.dark .firstcall-toggle-row {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+.dark .firstcall-toggle label,
+body.dark .firstcall-toggle label {
+    background: #334155 !important;
+    border-color: #475569 !important;
+    color: #94a3b8 !important;
+}
+
+.dark .firstcall-toggle label:hover,
+body.dark .firstcall-toggle label:hover {
+    background: #475569 !important;
+    color: #e2e8f0 !important;
+}
+
+/* ===== Dark Mode - Filter Bar & Dropdowns ===== */
+.dark .filter-bar,
+body.dark .filter-bar {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+.dark .filter-dropdown label,
+body.dark .filter-dropdown label {
+    color: #94a3b8 !important;
+}
+
+/* ===== Dark Mode - Chart Containers ===== */
+.dark .chart-container,
+body.dark .chart-container {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+.dark .chart-container h3,
+body.dark .chart-container h3 {
+    color: #f1f5f9 !important;
+}
+
+.dark .chart-container p,
+body.dark .chart-container p {
+    color: #94a3b8 !important;
+}
+
+/* Plotly chart dark mode - target SVG backgrounds */
+.dark .js-plotly-plot,
+body.dark .js-plotly-plot {
+    background: #1e293b !important;
+}
+
+.dark .js-plotly-plot .main-svg,
+body.dark .js-plotly-plot .main-svg {
+    background: #1e293b !important;
+}
+
+.dark .js-plotly-plot .bg,
+body.dark .js-plotly-plot .bg {
+    fill: #1e293b !important;
+}
+
+.dark .plotly .modebar,
+body.dark .plotly .modebar {
+    background: transparent !important;
+}
+
+.dark .plotly .modebar-btn path,
+body.dark .plotly .modebar-btn path {
+    fill: #94a3b8 !important;
+}
+
+/* ===== Dark Mode - Gradio Plot Component ===== */
+.dark .gr-plot,
+.dark [data-testid="plot"],
+body.dark .gr-plot,
+body.dark [data-testid="plot"] {
+    background: #1e293b !important;
+}
+
+/* ===== Dark Mode - Info Grid in Detail Panel ===== */
+.dark .info-grid .info-item,
+body.dark .info-grid .info-item {
+    background: #334155 !important;
+}
+
+/* ===== Dark Mode - Accordion ===== */
+.dark .gr-accordion,
+.dark .accordion,
+body.dark .gr-accordion,
+body.dark .accordion {
+    background: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+.dark .gr-accordion .label-wrap,
+body.dark .gr-accordion .label-wrap {
+    background: #1e293b !important;
+    color: #f1f5f9 !important;
+}
