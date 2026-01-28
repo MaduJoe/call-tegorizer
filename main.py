@@ -167,7 +167,7 @@ async def process_call_llm_only(stt_file: Path, analyzer, output_path, progress:
     return result
 
 
-async def process_call(call_info, stt, analyzer, output_path, stt_lock, progress: ProgressTracker = None):
+async def process_call(call_info, stt, analyzer, output_path, stt_lock, progress: ProgressTracker = None, llm_semaphore: asyncio.Semaphore = None):
     """개별 통화 처리 (STT + LLM 통합)"""
     day_folder = call_info["day_folder"]
     call_id = call_info["call_id"]
@@ -209,12 +209,20 @@ async def process_call(call_info, stt, analyzer, output_path, stt_lock, progress
 
 
     llm_start = time.time()
-    # 분석(LLM)은 STT 끝난 뒤 병렬 실행 가능 (여긴 lock 필요 없음)
-    analysis = await loop.run_in_executor(
-        None,
-        analyzer.summarize,
-        transcript["merged"]
-    )
+    # 분석(LLM)은 STT 끝난 뒤 병렬 실행 가능 - semaphore로 동시 호출 수 제한
+    if llm_semaphore:
+        async with llm_semaphore:
+            analysis = await loop.run_in_executor(
+                None,
+                analyzer.summarize,
+                transcript["merged"]
+            )
+    else:
+        analysis = await loop.run_in_executor(
+            None,
+            analyzer.summarize,
+            transcript["merged"]
+        )
     llm_end = time.time()
     print(f"    ✓ Analysis completed in {llm_end - llm_start:.2f} seconds")
 
@@ -241,13 +249,15 @@ async def process_call(call_info, stt, analyzer, output_path, stt_lock, progress
     return result
 
 
-async def process_batch(input_dir: str = None, output_dir: str = None, phase: str = "all", not_firstcall: bool = False):
+async def process_batch(input_dir: str = None, output_dir: str = None, phase: str = "all", not_firstcall: bool = False, only_firstcall: bool = False, priority_dir: str = None, only_dir: str = None):
     """
     Phase 기반 배치 처리
     - phase="stt": STT만 처리 (Ollama 정지 상태에서 실행 권장)
     - phase="llm": LLM만 처리 (_stt.json 파일 기반)
     - phase="all": STT + LLM 통합 처리
-    - not_firstcall: True면 첫콜=N인 건만 처리
+    - not_firstcall: True면 첫콜=N(재콜)인 건만 처리
+    - only_firstcall: True면 첫콜=Y인 건만 처리
+    - only_dir: 특정 날짜만 처리 (예: "01/05")
     """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
@@ -268,20 +278,27 @@ async def process_batch(input_dir: str = None, output_dir: str = None, phase: st
 
     # Phase별 처리
     if phase == "stt":
-        await process_phase_stt(input_path, output_path, stt, stt_lock, not_firstcall)
+        await process_phase_stt(input_path, output_path, stt, stt_lock, not_firstcall, only_firstcall, only_dir)
     elif phase == "llm":
-        await process_phase_llm(output_path, analyzer, not_firstcall)
+        await process_phase_llm(output_path, analyzer, not_firstcall, only_firstcall, priority_dir, only_dir)
     else:  # all
-        await process_phase_all(input_path, output_path, stt, analyzer, stt_lock, not_firstcall)
+        await process_phase_all(input_path, output_path, stt, analyzer, stt_lock, not_firstcall, only_firstcall, only_dir)
 
     print(f"\n{'='*60}\nAll processing completed!\n{'='*60}")
 
 
-async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, not_firstcall: bool = False):
+async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, not_firstcall: bool = False, only_firstcall: bool = False, only_dir: str = None):
     """Phase 1: STT만 처리"""
     from utils.firstcall_filter import filter_call_ids
 
     day_folders = get_day_folders(input_path)
+
+    # 특정 날짜만 필터링 (--only 옵션)
+    if only_dir:
+        only_path = only_dir.replace("\\", "/")
+        day_folders = [f for f in day_folders if only_path in str(f).replace("\\", "/")]
+        print(f"Filtering to only: {only_dir}")
+
     print(f"Found {len(day_folders)} day folders to process.")
 
     # 전체 call 수 계산
@@ -292,7 +309,8 @@ async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, 
         filtered_call_ids = filter_call_ids(
             day_info["call_ids"],
             day_info["day"],
-            only_not_firstcall=not_firstcall
+            only_not_firstcall=not_firstcall,
+            only_firstcall=only_firstcall
         )
         for call_id in filtered_call_ids:
             all_calls.append({
@@ -302,7 +320,7 @@ async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, 
                 "call_id": call_id
             })
 
-    filter_msg = " (첫콜=N만)" if not_firstcall else ""
+    filter_msg = " (첫콜=N만)" if not_firstcall else (" (첫콜=Y만)" if only_firstcall else "")
     print(f"Total {len(all_calls)} calls to process (STT phase){filter_msg}")
     progress = ProgressTracker(len(all_calls), "STT")
 
@@ -311,12 +329,29 @@ async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, 
         await process_call_stt_only(call_info, stt, output_path, stt_lock, progress)
 
 
-async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = False):
+async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = False, only_firstcall: bool = False, priority_dir: str = None, only_dir: str = None):
     """Phase 2: LLM만 처리 (.transcript.json 파일 기반)"""
-    from utils.firstcall_filter import get_all_not_firstcall_ids
+    from utils.firstcall_filter import get_all_not_firstcall_ids, get_all_firstcall_ids
 
     # .transcript.json 파일 찾기
     stt_files = list(output_path.glob("**/*.transcript.json"))
+
+    # 특정 날짜만 필터링 (--only 옵션)
+    if only_dir:
+        only_path = only_dir.replace("\\", "/")
+        stt_files = [f for f in stt_files if only_path in str(f).replace("\\", "/")]
+        print(f"Filtering to only: {only_dir}")
+
+    # 우선 처리 디렉토리 정렬
+    if priority_dir:
+        priority_path = priority_dir.replace("\\", "/")
+        def priority_sort(f):
+            file_path = str(f).replace("\\", "/")
+            if priority_path in file_path:
+                return (0, str(f))
+            return (1, str(f))
+        stt_files = sorted(stt_files, key=priority_sort)
+        print(f"Priority directory: {priority_dir}")
 
     # 첫콜 필터링 적용
     if not_firstcall:
@@ -329,8 +364,17 @@ async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = F
             if day in not_firstcall_ids and call_id in not_firstcall_ids[day]:
                 filtered_files.append(stt_file)
         stt_files = filtered_files
+    elif only_firstcall:
+        firstcall_ids = get_all_firstcall_ids()
+        filtered_files = []
+        for stt_file in stt_files:
+            call_id = stt_file.stem.replace('.transcript', '')
+            day = stt_file.parent.name
+            if day in firstcall_ids and call_id in firstcall_ids[day]:
+                filtered_files.append(stt_file)
+        stt_files = filtered_files
 
-    filter_msg = " (첫콜=N만)" if not_firstcall else ""
+    filter_msg = " (첫콜=N만)" if not_firstcall else (" (첫콜=Y만)" if only_firstcall else "")
     print(f"Found {len(stt_files)} STT results to analyze{filter_msg}")
 
     if not stt_files:
@@ -339,26 +383,42 @@ async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = F
 
     progress = ProgressTracker(len(stt_files), "LLM")
 
-    # LLM은 병렬 처리 가능
-    tasks = []
-    for stt_file in stt_files:
-        task = asyncio.create_task(
-            process_call_llm_only(stt_file, analyzer, output_path, progress)
-        )
-        tasks.append(task)
+    # config에서 병렬 처리 수 가져오기
+    from config import get_config
+    config = get_config()
+    batch_size = config.get('processing.max_concurrent_llm', 5)
+    print(f"LLM batch size: {batch_size}")
 
-    # 병렬 실행 (동시에 5개씩)
-    batch_size = 5
-    for i in range(0, len(tasks), batch_size):
-        batch = tasks[i:i + batch_size]
-        await asyncio.gather(*batch)
+    # LLM 병렬 처리
+    for i in range(0, len(stt_files), batch_size):
+        batch_files = stt_files[i:i + batch_size]
+        tasks = [
+            asyncio.create_task(
+                process_call_llm_only(stt_file, analyzer, output_path, progress)
+            )
+            for stt_file in batch_files
+        ]
+        await asyncio.gather(*tasks)
 
 
-async def process_phase_all(input_path: Path, output_path: Path, stt, analyzer, stt_lock, not_firstcall: bool = False):
+async def process_phase_all(input_path: Path, output_path: Path, stt, analyzer, stt_lock, not_firstcall: bool = False, only_firstcall: bool = False, only_dir: str = None):
     """통합 처리 (STT + LLM)"""
     from utils.firstcall_filter import filter_call_ids
 
+    # LLM 동시 호출 제한을 위한 semaphore
+    config = get_config()
+    max_concurrent_llm = config.get('processing.max_concurrent_llm', 5)
+    llm_semaphore = asyncio.Semaphore(max_concurrent_llm)
+    print(f"LLM concurrency limit: {max_concurrent_llm}")
+
     day_folders = get_day_folders(input_path)
+
+    # 특정 날짜만 필터링 (--only 옵션)
+    if only_dir:
+        only_path = only_dir.replace("\\", "/")
+        day_folders = [f for f in day_folders if only_path in str(f).replace("\\", "/")]
+        print(f"Filtering to only: {only_dir}")
+
     print(f"Found {len(day_folders)} day folders to process.")
 
     # 전체 call 수 계산 (필터링 적용)
@@ -368,7 +428,8 @@ async def process_phase_all(input_path: Path, output_path: Path, stt, analyzer, 
         filtered_call_ids = filter_call_ids(
             day_info["call_ids"],
             day_info["day"],
-            only_not_firstcall=not_firstcall
+            only_not_firstcall=not_firstcall,
+            only_firstcall=only_firstcall
         )
         for call_id in filtered_call_ids:
             all_calls.append({
@@ -378,16 +439,16 @@ async def process_phase_all(input_path: Path, output_path: Path, stt, analyzer, 
                 "call_id": call_id
             })
 
-    filter_msg = " (첫콜=N만)" if not_firstcall else ""
+    filter_msg = " (첫콜=N만)" if not_firstcall else (" (첫콜=Y만)" if only_firstcall else "")
     print(f"Total {len(all_calls)} calls to process{filter_msg}")
     progress = ProgressTracker(len(all_calls), "ALL")
 
     # 비동기 처리를 위한 결과 수집
     all_results = []
 
-    # 순차 처리 (필터링 적용된 리스트 사용)
+    # 비동기 처리 (STT는 lock, LLM은 semaphore로 동시성 제어)
     for call_info in all_calls:
-        task = asyncio.create_task(process_call(call_info, stt, analyzer, output_path, stt_lock, progress))
+        task = asyncio.create_task(process_call(call_info, stt, analyzer, output_path, stt_lock, progress, llm_semaphore))
         all_results.append(task)
 
     # 모든 비동기 작업 완료 대기
@@ -431,8 +492,14 @@ if __name__ == "__main__":
     mode_group.add_argument("--llm", action="store_true", help="LLM 분석만 실행")
     mode_group.add_argument("--dashboard", action="store_true", help="웹 대시보드 실행")
 
-    # 필터링 옵션
-    parser.add_argument("--not-firstcall", action="store_true", help="첫콜=N인 건만 처리")
+    # 필터링 옵션 (상호 배타적)
+    filter_group = parser.add_mutually_exclusive_group()
+    filter_group.add_argument("--not-firstcall", action="store_true", help="첫콜=N인 건(재콜)만 처리")
+    filter_group.add_argument("--firstcall", action="store_true", help="첫콜=Y인 건(첫콜)만 처리")
+
+    # 디렉토리 옵션
+    parser.add_argument("--priority", type=str, help="우선 처리할 디렉토리 경로 (예: 01/04)")
+    parser.add_argument("--only", type=str, help="특정 날짜만 처리 (예: 01/05)")
 
     args = parser.parse_args()
 
@@ -467,8 +534,13 @@ if __name__ == "__main__":
                 print(f"{key}: {value}")
 
         if args.not_firstcall:
-            print("\n⚠️  필터: 첫콜=N인 건만 처리")
+            print("\n⚠️  필터: 첫콜=N인 건(재콜)만 처리")
+        elif args.firstcall:
+            print("\n⚠️  필터: 첫콜=Y인 건(첫콜)만 처리")
+
+        if args.only:
+            print(f"\n📁 대상 날짜: {args.only}만 처리")
 
         print(f"\n{'='*60}\n")
 
-        asyncio.run(process_batch(args.input_dir, args.output_dir, phase, args.not_firstcall))
+        asyncio.run(process_batch(args.input_dir, args.output_dir, phase, args.not_firstcall, args.firstcall, args.priority, args.only))
