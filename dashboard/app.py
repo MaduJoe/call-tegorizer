@@ -650,6 +650,115 @@ class CallAnalyticsDashboard:
 
         return fig
 
+    def export_sunburst_to_excel(self, call_type_filter: str = "전체"):
+        """Sunburst 차트 데이터를 Excel 파일로 내보내기 (전체/첫콜/재콜 시트 포함)"""
+        import tempfile
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+
+        all_calls = self.load_all_calls()
+        if not all_calls:
+            return None
+
+        # Excel 파일 생성
+        wb = Workbook()
+        wb.remove(wb.active)  # 기본 시트 제거
+
+        # 스타일 정의
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="3b82f6", end_color="3b82f6", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+        subtotal_fill = PatternFill(start_color="e5e7eb", end_color="e5e7eb", fill_type="solid")
+        total_fill = PatternFill(start_color="fbbf24", end_color="fbbf24", fill_type="solid")
+        total_font = Font(bold=True)
+
+        # 각 필터 유형별로 시트 생성
+        for filter_type in ["전체", "첫콜", "재콜"]:
+            # 필터 적용
+            if filter_type == "첫콜":
+                calls = [c for c in all_calls if c.get('_is_firstcall') is True]
+            elif filter_type == "재콜":
+                calls = [c for c in all_calls if c.get('_is_firstcall') is False]
+            else:
+                calls = all_calls
+
+            # 카테고리 → 세부 카테고리 계층 데이터 구성
+            hierarchy_data = []
+            for call in calls:
+                analysis = call.get('analysis', {})
+                category = analysis.get('category')
+                sub_category = analysis.get('sub_category')
+                if category and category != 'N/A':
+                    hierarchy_data.append({
+                        '카테고리': category,
+                        '세부카테고리': sub_category if sub_category and sub_category != 'N/A' else '(미분류)',
+                    })
+
+            # 시트 생성
+            ws = wb.create_sheet(title=filter_type)
+
+            if not hierarchy_data:
+                ws.cell(row=1, column=1, value="데이터 없음")
+                continue
+
+            df = pd.DataFrame(hierarchy_data)
+            counts = df.groupby(['카테고리', '세부카테고리']).size().reset_index(name='건수')
+            category_totals = counts.groupby('카테고리')['건수'].sum().reset_index()
+            category_totals['세부카테고리'] = '(소계)'
+
+            grand_total = counts['건수'].sum()
+            counts['비율'] = (counts['건수'] / grand_total * 100).round(1).astype(str) + '%'
+            category_totals['비율'] = (category_totals['건수'] / grand_total * 100).round(1).astype(str) + '%'
+
+            # 헤더 작성
+            for col, header in enumerate(['카테고리', '세부카테고리', '건수', '비율'], 1):
+                cell = ws.cell(row=1, column=col, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+
+            # 데이터 작성
+            row_idx = 2
+            for category in counts['카테고리'].unique():
+                cat_data = counts[counts['카테고리'] == category]
+                cat_total = category_totals[category_totals['카테고리'] == category].iloc[0]
+
+                for _, row in cat_data.iterrows():
+                    ws.cell(row=row_idx, column=1, value=row['카테고리'])
+                    ws.cell(row=row_idx, column=2, value=row['세부카테고리'])
+                    ws.cell(row=row_idx, column=3, value=row['건수'])
+                    ws.cell(row=row_idx, column=4, value=row['비율'])
+                    row_idx += 1
+
+                # 카테고리 소계
+                for col in range(1, 5):
+                    ws.cell(row=row_idx, column=col).fill = subtotal_fill
+                ws.cell(row=row_idx, column=1, value=cat_total['카테고리'])
+                ws.cell(row=row_idx, column=2, value=cat_total['세부카테고리'])
+                ws.cell(row=row_idx, column=3, value=cat_total['건수'])
+                ws.cell(row=row_idx, column=4, value=cat_total['비율'])
+                row_idx += 1
+
+            # 전체 합계
+            for col in range(1, 5):
+                ws.cell(row=row_idx, column=col).fill = total_fill
+                ws.cell(row=row_idx, column=col).font = total_font
+            ws.cell(row=row_idx, column=1, value='합계')
+            ws.cell(row=row_idx, column=2, value='')
+            ws.cell(row=row_idx, column=3, value=grand_total)
+            ws.cell(row=row_idx, column=4, value='100%')
+
+            # 열 너비 조정
+            ws.column_dimensions['A'].width = 15
+            ws.column_dimensions['B'].width = 25
+            ws.column_dimensions['C'].width = 10
+            ws.column_dimensions['D'].width = 10
+
+        # 임시 파일로 저장
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+        wb.save(temp_file.name)
+        return temp_file.name
+
     def create_sentiment_chart(self):
         """감정 분포 Plotly 차트"""
         stats = self.get_statistics()
@@ -1310,13 +1419,19 @@ class CallAnalyticsDashboard:
 
                         with gr.Column():
                             gr.HTML('<div class="chart-container"><h3 class="chart-title">🌐 카테고리 상세</h3><p class="chart-subtitle">클릭하여 세부 카테고리 확인</p>')
-                            sunburst_filter = gr.Radio(
-                                choices=["전체", "첫콜", "재콜"],
-                                value="전체",
-                                label="",
-                                elem_classes="firstcall-toggle",
-                                container=False
-                            )
+                            with gr.Row():
+                                sunburst_filter = gr.Radio(
+                                    choices=["전체", "첫콜", "재콜"],
+                                    value="전체",
+                                    label="",
+                                    elem_classes="firstcall-toggle",
+                                    container=False
+                                )
+                                sunburst_download_btn = gr.DownloadButton(
+                                    "Download Excel",
+                                    size="lg",
+                                    elem_classes="download-btn"
+                                )
                             sunburst_chart = gr.Plot(value=self.create_category_sunburst())
                             gr.HTML('</div>')
 
@@ -1357,6 +1472,17 @@ class CallAnalyticsDashboard:
                         fn=self.create_category_sunburst,
                         inputs=[sunburst_filter],
                         outputs=[sunburst_chart]
+                    )
+
+                    # Sunburst Excel 다운로드 - DownloadButton 이벤트
+                    def download_sunburst_excel(call_type_filter):
+                        file_path = self.export_sunburst_to_excel(call_type_filter)
+                        return file_path
+
+                    sunburst_download_btn.click(
+                        fn=download_sunburst_excel,
+                        inputs=[sunburst_filter],
+                        outputs=[sunburst_download_btn]
                     )
 
                 # Tab 3: Cost Analysis (별도 모듈에서 관리)
