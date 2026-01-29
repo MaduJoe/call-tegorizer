@@ -15,6 +15,40 @@ class CallAnalyticsDashboard:
     # 인덱스 캐시에 저장할 필드 (transcript 제외)
     INDEX_FIELDS = ['call_id', 'date', 'analysis', '_file_path']
 
+    # Theme-adaptive Plotly layout settings
+    # Uses transparent backgrounds so CSS can control the container background
+    # Text colors are set to use CSS variables via JS detection at runtime
+    def get_theme_layout(self, is_dark=None):
+        """Return theme-aware Plotly layout settings.
+
+        Uses transparent background so the chart container's CSS background shows through.
+        Text colors adapt based on the theme.
+        """
+        # Default to supporting both light and dark via transparent bg
+        # The actual text color will be determined by Plotly's default or can be overridden
+        return dict(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+
+    # For light mode charts
+    LIGHT_LAYOUT = dict(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#1e293b'),
+        xaxis=dict(gridcolor='#e2e8f0', linecolor='#cbd5e1', tickfont=dict(color='#64748b'), title_font=dict(color='#1e293b')),
+        yaxis=dict(gridcolor='#e2e8f0', linecolor='#cbd5e1', tickfont=dict(color='#64748b'), title_font=dict(color='#1e293b')),
+    )
+
+    # For dark mode charts
+    DARK_LAYOUT = dict(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e2e8f0'),
+        xaxis=dict(gridcolor='#334155', linecolor='#475569', tickfont=dict(color='#94a3b8'), title_font=dict(color='#e2e8f0')),
+        yaxis=dict(gridcolor='#334155', linecolor='#475569', tickfont=dict(color='#94a3b8'), title_font=dict(color='#e2e8f0')),
+    )
+
     def __init__(self, output_dir: str = None):
         config = get_config()
         self.output_dir = Path(output_dir or config.get('paths.output_dir'))
@@ -289,7 +323,7 @@ class CallAnalyticsDashboard:
             data.append({
                 '#': idx + 1,
                 '날짜': call.get('date', 'N/A'),
-                '첫콜': firstcall_display,
+                '콜종류': firstcall_display,
                 'Call ID': call_id[:7] + '...' + call_id[-7:] if len(call_id) > 14 else call_id,
                 '카테고리': analysis.get('category', 'N/A'),
                 '세부': analysis.get('sub_category') or analysis.get('inquiry_type', 'N/A'),
@@ -327,9 +361,9 @@ class CallAnalyticsDashboard:
 
         # Firstcall toggle filter (전체/첫콜/재콜/클레임)
         if firstcall_filter == "첫콜":
-            df = df[df['첫콜'].str.contains('첫콜', na=False)]
+            df = df[df['콜종류'].str.contains('첫콜', na=False)]
         elif firstcall_filter == "재콜":
-            df = df[df['첫콜'].str.contains('재콜', na=False)]
+            df = df[df['콜종류'].str.contains('재콜', na=False)]
         elif firstcall_filter == "클레임":
             df = df[df['세부'].str.contains('클레임', na=False)]
 
@@ -422,11 +456,11 @@ class CallAnalyticsDashboard:
         tags = analysis.get('tags', [])
         if tags:
             tags_html = ' '.join([
-                f'<span style="background: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; margin-right: 6px;">{tag}</span>'
+                f'<span class="detail-tag">{tag}</span>'
                 for tag in tags
             ])
         else:
-            tags_html = '<span style="color: #9ca3af;">없음</span>'
+            tags_html = '<span class="detail-empty">없음</span>'
 
         detail_html = f"""
         <div class="detail-panel">
@@ -453,35 +487,31 @@ class CallAnalyticsDashboard:
                 </div>
             </div>
 
-            <div style="display: flex; gap: 12px; margin-bottom: 20px;">
-                <div>
-                    <span class="badge {resolution_class}">{resolution}</span>
-                </div>
-                <div>
-                    <span class="badge {sentiment_class}">{sentiment}</span>
-                </div>
+            <div class="detail-badges">
+                <span class="badge {resolution_class}">{resolution}</span>
+                <span class="badge {sentiment_class}">{sentiment}</span>
             </div>
 
-            <div style="margin-bottom: 20px;">
-                <div class="label" style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600;">📝 요약</div>
-                <div style="background: #f8fafc; padding: 16px; border-radius: 8px; font-size: 14px; line-height: 1.6; color: #374151;">
+            <div class="detail-section">
+                <div class="detail-section-label">📝 요약</div>
+                <div class="detail-section-content summary-box">
                     {analysis.get('summary', 'N/A')}
                 </div>
             </div>
 
-            <div style="margin-bottom: 20px;">
-                <div class="label" style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600;">🏷️ 키워드</div>
-                <div style="font-size: 14px; color: #475569;">{keywords}</div>
+            <div class="detail-section">
+                <div class="detail-section-label">🏷️ 키워드</div>
+                <div class="detail-section-content">{keywords}</div>
             </div>
 
-            <div style="margin-bottom: 20px;">
-                <div class="label" style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600;">🔖 특이사항</div>
-                <div style="font-size: 14px;">{tags_html}</div>
+            <div class="detail-section">
+                <div class="detail-section-label">🔖 특이사항</div>
+                <div class="detail-section-content">{tags_html}</div>
             </div>
 
-            <div style="margin-bottom: 20px;">
-                <div class="label" style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: 600;">⚡ 후속 조치</div>
-                <div style="font-size: 14px; color: #475569;">{analysis.get('action_required') or '없음'}</div>
+            <div class="detail-section">
+                <div class="detail-section-label">⚡ 후속 조치</div>
+                <div class="detail-section-content">{analysis.get('action_required') or '없음'}</div>
             </div>
         </div>
         """
@@ -503,8 +533,8 @@ class CallAnalyticsDashboard:
         return """
         <div class="empty-state" style="padding: 60px 20px; text-align: center;">
             <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
-            <h3 style="color: #475569; margin: 0 0 8px 0;">통화를 선택해주세요</h3>
-            <p style="color: #94a3b8; font-size: 14px;">테이블에서 행을 클릭하면 상세 정보가 표시됩니다</p>
+            <h3 class="empty-state-title">통화를 선택해주세요</h3>
+            <p class="empty-state-desc">테이블에서 행을 클릭하면 상세 정보가 표시됩니다</p>
         </div>
         """
 
@@ -547,7 +577,7 @@ class CallAnalyticsDashboard:
                 xaxis_title="카테고리",
                 yaxis_title="건수",
                 paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
+                plot_bgcolor='rgba(0,0,0,0)',
             )
         return fig
 
@@ -560,6 +590,7 @@ class CallAnalyticsDashboard:
         calls = self.load_all_calls()
         if not calls:
             fig = px.sunburst(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
             return fig
 
         # 첫콜/재콜 필터 적용
@@ -583,6 +614,7 @@ class CallAnalyticsDashboard:
 
         if not hierarchy_data:
             fig = px.sunburst(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
             return fig
 
         df = pd.DataFrame(hierarchy_data)
@@ -607,14 +639,13 @@ class CallAnalyticsDashboard:
         fig.update_traces(
             textinfo='label+value+percent entry',
             insidetextorientation='radial',
-            texttemplate='%{label}<br>%{value}건<br>(%{percentEntry:.1%})'
+            texttemplate='%{label}<br>%{value}건<br>(%{percentEntry:.1%})',
         )
 
         fig.update_layout(
             height=500,
             margin=dict(t=30, b=30, l=30, r=30),
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
         )
 
         return fig
@@ -643,7 +674,7 @@ class CallAnalyticsDashboard:
                 xaxis_title="",
                 yaxis_title="건수",
                 paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
+                plot_bgcolor='rgba(0,0,0,0)',
             )
         return fig
 
@@ -671,7 +702,7 @@ class CallAnalyticsDashboard:
                 xaxis_title="",
                 yaxis_title="건수",
                 paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
+                plot_bgcolor='rgba(0,0,0,0)',
             )
         return fig
 
@@ -686,6 +717,7 @@ class CallAnalyticsDashboard:
 
         if df['건수'].sum() == 0:
             fig = px.pie(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
         else:
             color_map = {'첫콜': '#3b82f6', '재콜': '#f59e0b'}
             fig = px.pie(df, values='건수', names='유형', color='유형',
@@ -695,9 +727,9 @@ class CallAnalyticsDashboard:
                 height=400,
                 margin=dict(t=30, b=30, l=30, r=30),
                 showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5,
+                           bgcolor='rgba(0,0,0,0)'),
                 paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
             )
         return fig
 
@@ -705,7 +737,9 @@ class CallAnalyticsDashboard:
         """카테고리별 첫콜/재콜 분포 비교 차트 (합계 기준 내림차순)"""
         calls = self.load_all_calls()
         if not calls:
-            return px.bar(title="데이터 없음")
+            fig = px.bar(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         data = []
         for call in calls:
@@ -716,7 +750,9 @@ class CallAnalyticsDashboard:
                 data.append({'카테고리': category, '유형': call_type})
 
         if not data:
-            return px.bar(title="데이터 없음")
+            fig = px.bar(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         df = pd.DataFrame(data)
         counts = df.groupby(['카테고리', '유형']).size().reset_index(name='건수')
@@ -736,9 +772,10 @@ class CallAnalyticsDashboard:
             margin=dict(t=30, b=40, l=40, r=40),
             xaxis_title="카테고리",
             yaxis_title="건수",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                       bgcolor='rgba(0,0,0,0)'),
         )
         return fig
 
@@ -746,7 +783,9 @@ class CallAnalyticsDashboard:
         """일자별 첫콜/재콜 추이 차트"""
         calls = self.load_all_calls()
         if not calls:
-            return px.line(title="데이터 없음")
+            fig = px.line(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         data = []
         all_dates = set()
@@ -760,7 +799,9 @@ class CallAnalyticsDashboard:
                     data.append({'날짜': date, '유형': call_type})
 
         if not data or not all_dates:
-            return px.line(title="데이터 없음")
+            fig = px.line(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         df = pd.DataFrame(data)
         counts = df.groupby(['날짜', '유형']).size().reset_index(name='건수')
@@ -779,9 +820,10 @@ class CallAnalyticsDashboard:
             margin=dict(t=30, b=40, l=40, r=40),
             xaxis_title="날짜",
             yaxis_title="건수",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                       bgcolor='rgba(0,0,0,0)'),
         )
         return fig
 
@@ -789,7 +831,9 @@ class CallAnalyticsDashboard:
         """첫콜/재콜별 해결률 비교 차트"""
         calls = self.load_all_calls()
         if not calls:
-            return px.bar(title="데이터 없음")
+            fig = px.bar(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         # 첫콜/재콜별 해결 현황 집계
         stats = {'첫콜': Counter(), '재콜': Counter()}
@@ -815,7 +859,9 @@ class CallAnalyticsDashboard:
                 })
 
         if not data:
-            return px.bar(title="데이터 없음")
+            fig = px.bar(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         df = pd.DataFrame(data)
         color_map = {'첫콜': '#3b82f6', '재콜': '#f59e0b'}
@@ -830,7 +876,7 @@ class CallAnalyticsDashboard:
             yaxis=dict(range=[0, 100]),
             showlegend=False,
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            plot_bgcolor='rgba(0,0,0,0)',
         )
         return fig
 
@@ -838,7 +884,9 @@ class CallAnalyticsDashboard:
         """첫콜/재콜별 감정 비교 차트"""
         calls = self.load_all_calls()
         if not calls:
-            return px.bar(title="데이터 없음")
+            fig = px.bar(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         data = []
         for call in calls:
@@ -849,7 +897,9 @@ class CallAnalyticsDashboard:
                 data.append({'유형': call_type, '감정': sentiment})
 
         if not data:
-            return px.bar(title="데이터 없음")
+            fig = px.bar(title="데이터 없음")
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+            return fig
 
         df = pd.DataFrame(data)
         counts = df.groupby(['감정', '유형']).size().reset_index(name='건수')
@@ -868,9 +918,10 @@ class CallAnalyticsDashboard:
             margin=dict(t=30, b=40, l=40, r=40),
             xaxis_title="",
             yaxis_title="건수",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                       bgcolor='rgba(0,0,0,0)'),
         )
         return fig
 
@@ -1232,33 +1283,33 @@ class CallAnalyticsDashboard:
                 with gr.Tab("📈 통계 분석", id="stats"):
                     firstcall_stats = self._get_firstcall_stats()
                     gr.HTML(f"""
-                    <div style="margin-bottom: 24px;">
-                        <h2 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 600; color: #1e293b;">📊 첫콜 vs 재콜 비교 분석</h2>
-                        <p style="color: #64748b; margin: 0;">총 {stats.get('total_calls', 0)}건 (첫콜 {firstcall_stats['firstcall']}건 / 재콜 {firstcall_stats['repeat']}건)</p>
+                    <div class="stats-header">
+                        <h2 class="text-title">📊 첫콜 vs 재콜 비교 분석</h2>
+                        <p class="text-subtitle">총 {stats.get('total_calls', 0)}건 (첫콜 {firstcall_stats['firstcall']}건 / 재콜 {firstcall_stats['repeat']}건)</p>
                     </div>
                     """)
 
                     # Row 1: 첫콜/재콜 비율 + 일자별 추이
                     with gr.Row():
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">🥧 첫콜/재콜 비율</h3>')
+                            gr.HTML('<div class="chart-container"><h3 class="chart-title">🥧 첫콜/재콜 비율</h3>')
                             firstcall_pie_chart = gr.Plot(value=self.create_firstcall_comparison_chart())
                             gr.HTML('</div>')
 
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">📈 일자별 추이</h3>')
+                            gr.HTML('<div class="chart-container"><h3 class="chart-title">📈 일자별 추이</h3>')
                             daily_trend_chart = gr.Plot(value=self.create_daily_trend_chart())
                             gr.HTML('</div>')
 
                     # Row 2: 카테고리별 비교 + 카테고리 상세
                     with gr.Row():
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">📊 카테고리별 비교</h3>')
+                            gr.HTML('<div class="chart-container"><h3 class="chart-title">📊 카테고리별 비교</h3>')
                             category_comparison_chart = gr.Plot(value=self.create_category_comparison_chart())
                             gr.HTML('</div>')
 
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">🌐 카테고리 상세</h3><p style="color: #64748b; font-size: 13px; margin-top: 4px;">클릭하여 세부 카테고리 확인</p>')
+                            gr.HTML('<div class="chart-container"><h3 class="chart-title">🌐 카테고리 상세</h3><p class="chart-subtitle">클릭하여 세부 카테고리 확인</p>')
                             sunburst_filter = gr.Radio(
                                 choices=["전체", "첫콜", "재콜"],
                                 value="전체",
@@ -1272,12 +1323,12 @@ class CallAnalyticsDashboard:
                     # Row 3: 감정 비교 + 해결률 비교
                     with gr.Row():
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">😊 감정 분포 비교</h3>')
+                            gr.HTML('<div class="chart-container"><h3 class="chart-title">😊 감정 분포 비교</h3>')
                             sentiment_comparison_chart = gr.Plot(value=self.create_sentiment_comparison_chart())
                             gr.HTML('</div>')
 
                         with gr.Column():
-                            gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">✅ 해결률 비교</h3>')
+                            gr.HTML('<div class="chart-container"><h3 class="chart-title">✅ 해결률 비교</h3>')
                             resolution_comparison_chart = gr.Plot(value=self.create_resolution_comparison_chart())
                             gr.HTML('</div>')
 
@@ -1346,13 +1397,13 @@ class CallAnalyticsDashboard:
                             if isinstance(section_data, list):
                                 # 리스트 타입 (특이사항)
                                 tags = ' '.join([
-                                    f'<span style="background: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 12px; font-size: 12px; margin: 2px; display: inline-block;">{item}</span>'
+                                    f'<span class="category-tag category-tag-warning">{item}</span>'
                                     for item in section_data
                                 ])
                                 categories_items.append(f'''
-                                    <div style="margin-bottom: 20px;">
-                                        <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 10px;">{icon} {section_name}</div>
-                                        <div style="margin-left: 10px; line-height: 2;">{tags}</div>
+                                    <div class="category-section">
+                                        <div class="category-section-title">{icon} {section_name}</div>
+                                        <div class="category-tags-wrap">{tags}</div>
                                     </div>
                                 ''')
                             elif isinstance(section_data, dict):
@@ -1362,44 +1413,44 @@ class CallAnalyticsDashboard:
                                     if isinstance(value, str):
                                         # key: description 형태
                                         sub_items.append(f'''
-                                            <div style="margin-left: 10px; margin-bottom: 6px; display: flex; align-items: baseline;">
-                                                <span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; min-width: 80px;">{key}</span>
-                                                <span style="color: #64748b; font-size: 13px; margin-left: 8px;">{value}</span>
+                                            <div class="category-item">
+                                                <span class="category-key">{key}</span>
+                                                <span class="category-desc">{value}</span>
                                             </div>
                                         ''')
                                     elif isinstance(value, list):
                                         # key: [item1, item2, ...] 형태 (상품유형_예시)
                                         items_tags = ' '.join([
-                                            f'<span style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{item}</span>'
+                                            f'<span class="category-tag category-tag-default">{item}</span>'
                                             for item in value
                                         ])
                                         sub_items.append(f'''
-                                            <div style="margin-left: 10px; margin-bottom: 8px;">
-                                                <span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500;">{key}</span>
-                                                <div style="margin-top: 4px; margin-left: 10px; line-height: 1.8;">{items_tags}</div>
+                                            <div class="category-item-expanded">
+                                                <span class="category-key">{key}</span>
+                                                <div class="category-tags-wrap">{items_tags}</div>
                                             </div>
                                         ''')
 
                                 categories_items.append(f'''
-                                    <div style="margin-bottom: 20px;">
-                                        <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 10px;">{icon} {section_name}</div>
+                                    <div class="category-section">
+                                        <div class="category-section-title">{icon} {section_name}</div>
                                         {"".join(sub_items)}
                                     </div>
                                 ''')
 
                         categories_html = "".join(categories_items)
                     except Exception as e:
-                        categories_html = f'<p style="color: #ef4444;">카테고리 파일 로드 실패: {e}</p>'
+                        categories_html = f'<p class="error-text">카테고리 파일 로드 실패: {e}</p>'
 
                     with gr.Row():
                         # Left Column: 시스템 설정 (STT, LLM, 경로)
                         with gr.Column(scale=1):
                             gr.HTML(f"""
-                            <div>
-                                <h2 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 600; color: #1e293b;">⚙️ 시스템 설정</h2>
+                            <div class="settings-column">
+                                <h2 class="settings-title text-title">⚙️ 시스템 설정</h2>
 
-                                <div class="chart-container" style="margin-bottom: 20px;">
-                                    <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">🎤 STT (Speech-to-Text)</h3>
+                                <div class="chart-container settings-section">
+                                    <h3 class="chart-title">🎤 STT (Speech-to-Text)</h3>
                                     <div class="info-grid">
                                         <div class="info-item">
                                             <div class="label">Model</div>
@@ -1420,8 +1471,8 @@ class CallAnalyticsDashboard:
                                     </div>
                                 </div>
 
-                                <div class="chart-container" style="margin-bottom: 20px;">
-                                    <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">🤖 LLM (Large Language Model)</h3>
+                                <div class="chart-container settings-section">
+                                    <h3 class="chart-title">🤖 LLM (Large Language Model)</h3>
                                     <div class="info-grid">
                                         <div class="info-item">
                                             <div class="label">Provider</div>
@@ -1443,10 +1494,10 @@ class CallAnalyticsDashboard:
                                 </div>
 
                                 <div class="chart-container">
-                                    <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">📁 경로 설정</h3>
-                                    <div class="info-item" style="margin-bottom: 12px;">
+                                    <h3 class="chart-title">📁 경로 설정</h3>
+                                    <div class="info-item">
                                         <div class="label">Output Directory</div>
-                                        <div class="value" style="font-family: monospace; font-size: 13px;">{self.output_dir}</div>
+                                        <div class="value monospace">{self.output_dir}</div>
                                     </div>
                                 </div>
                             </div>
@@ -1455,11 +1506,11 @@ class CallAnalyticsDashboard:
                         # Right Column: 카테고리 분류 체계
                         with gr.Column(scale=1):
                             gr.HTML(f"""
-                            <div>
-                                <h2 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 600; color: #1e293b;">📂 카테고리 분류 체계</h2>
+                            <div class="settings-column">
+                                <h2 class="settings-title text-title">📂 카테고리 분류 체계</h2>
 
                                 <div class="chart-container">
-                                    <div style="max-height: 1200px; overflow-y: auto; padding: 12px; background: #f8fafc; border-radius: 8px;">
+                                    <div class="categories-scroll-container">
                                         {categories_html}
                                     </div>
                                 </div>

@@ -23,7 +23,7 @@ llm:
 # 처리 설정
 processing:
   batch_size: 10
-  max_concurrent_llm: 5  # LLM 병렬 처리 수
+  max_concurrent_llm: 4  # LLM 병렬 처리 수
 
   # 재시도 설정
   retry_attempts: 3
@@ -35,7 +35,7 @@ processing:
 
 # 경로 설정
 paths:
-  input_dir: /home/ajung/workspace/sample_call
+  input_dir: /home/ajung/workspace/sample_call/01/04
   output_dir: /home/ajung/workspace/sample_call/output
   categories_file: /home/ajung/workspace/call-tegorizer/config/categories.json
   log_dir: /home/ajung/workspace/call-tegorizer/logs

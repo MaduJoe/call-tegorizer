@@ -180,7 +180,12 @@ class CostAnalysisTab:
 
         if selected_cost == 0:
             fig = px.pie(title="카테고리를 선택해주세요")
-            fig.update_layout(height=350, margin=dict(t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            fig.update_layout(
+                height=350,
+                margin=dict(t=20, b=20),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+            )
         else:
             df = pd.DataFrame([
                 {'구분': '예상 절감액', '금액': potential_savings},
@@ -196,20 +201,19 @@ class CostAnalysisTab:
             )
             fig.update_traces(
                 textinfo='label+percent',
-                texttemplate='%{label}<br>%{value:,.0f}원<br>(%{percent})'
+                texttemplate='%{label}<br>%{value:,.0f}원<br>(%{percent})',
             )
             fig.update_layout(
                 height=350,
                 margin=dict(t=20, b=20),
                 showlegend=False,
+                paper_bgcolor='rgba(0,0,0,0)',
                 annotations=[{
                     'text': f'선택 비용<br>{selected_cost:,.0f}원',
                     'x': 0.5, 'y': 0.5,
                     'font_size': 14,
                     'showarrow': False
-                }],
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
+                }]
             )
         return fig
 
@@ -234,6 +238,9 @@ class CostAnalysisTab:
         df = pd.DataFrame(data)
         if df.empty:
             fig = px.bar(title="데이터 없음")
+            fig.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
         else:
             df = df.sort_values('비용', ascending=False)
             fig = px.bar(
@@ -255,7 +262,8 @@ class CostAnalysisTab:
                 yaxis_title="비용 (원)",
                 legend_title="구분",
                 paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
+                plot_bgcolor='rgba(0,0,0,0)',
+                legend=dict(bgcolor='rgba(0,0,0,0)'),
             )
         return fig
 
@@ -271,9 +279,9 @@ class CostAnalysisTab:
         initial_savings = self.calculate_savings(initial_cost_data, initial_candidates, initial_success_rate)
 
         gr.HTML("""
-        <div style="margin-bottom: 24px;">
-            <h2 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 600; color: #1e293b;">💰 비용 분석 & 절감 시뮬레이션</h2>
-            <p style="color: #64748b; margin: 0;">자동화를 통한 비용 절감 효과를 시뮬레이션합니다</p>
+        <div class="stats-header">
+            <h2 class="text-title">💰 비용 분석 & 절감 시뮬레이션</h2>
+            <p class="text-subtitle">자동화를 통한 비용 절감 효과를 시뮬레이션합니다</p>
         </div>
         """)
 
@@ -309,18 +317,18 @@ class CostAnalysisTab:
         with gr.Row():
             # 절감 시뮬레이션 도넛 차트
             with gr.Column(scale=1):
-                gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">📉 절감 시뮬레이션</h3><p style="color: #64748b; font-size: 13px;">녹색: 자동화 성공률(%) 조율 가능 | 회색: 일반</p>')
+                gr.HTML('<div class="chart-container"><h3 class="chart-title">📉 절감 시뮬레이션</h3><p class="chart-subtitle">녹색: 자동화 성공률(%) 조율 가능 | 회색: 일반</p>')
                 savings_chart = gr.Plot(value=self.create_savings_simulation_chart(initial_savings))
                 gr.HTML('</div>')
 
             # 자동화 후보 차트
             with gr.Column(scale=2):
-                gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">🎯 카테고리별 비용</h3><p style="color: #64748b; font-size: 13px;">녹색: 자동화 대상 | 회색: 일반</p>')
+                gr.HTML('<div class="chart-container"><h3 class="chart-title">🎯 카테고리별 비용</h3><p class="chart-subtitle">녹색: 자동화 대상 | 회색: 일반</p>')
                 automation_chart = gr.Plot(value=self.create_automation_candidates_chart(initial_candidates, initial_cost_data))
                 gr.HTML('</div>')
 
         # 자동화 후보 상세 테이블
-        gr.HTML('<div class="chart-container" style="margin-top: 20px;"><h3 style="margin-top:0; color: #1e293b;">📋 선택된 자동화 대상 상세</h3>')
+        gr.HTML('<div class="chart-container cost-table-container"><h3 class="chart-title">📋 선택된 자동화 대상 상세</h3>')
         candidates_table = gr.Dataframe(
             value=self._generate_candidates_df(initial_candidates),
             interactive=False,
@@ -371,16 +379,16 @@ class CostAnalysisTab:
         # 선택된 카테고리가 없으면 안내 메시지
         if selected_calls == 0:
             return """
-            <div class="stats-row" style="margin-top: 20px;">
-                <div class="stat-card" style="flex: 1; text-align: center; padding: 40px;">
-                    <div class="stat-value" style="font-size: 18px; color: #64748b;">자동화 대상 카테고리를 선택해주세요</div>
+            <div class="stats-row cost-stats-row">
+                <div class="stat-card cost-empty-card">
+                    <div class="stat-value cost-empty-message">자동화 대상 카테고리를 선택해주세요</div>
                     <div class="stat-label">선택된 카테고리 기준으로 통계가 계산됩니다</div>
                 </div>
             </div>
             """
 
         return f"""
-        <div class="stats-row" style="margin-top: 20px;">
+        <div class="stats-row cost-stats-row">
             <div class="stat-card">
                 <div class="stat-value">{selected_calls:,}건</div>
                 <div class="stat-label">총 통화 건수</div>
@@ -401,10 +409,10 @@ class CostAnalysisTab:
                 <div class="stat-value">{automatable_categories}개</div>
                 <div class="stat-label">자동화 대상</div>
             </div>
-            <div class="stat-card stat-card-tooltip" style="border-left: 4px solid #22c55e; background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);">
+            <div class="stat-card stat-card-tooltip stat-card-success">
                 <span class="tooltip-text">📐 산출식
 총 통화 비용 {selected_cost:,.0f}원 × 자동화 성공률 {automation_rate:.0f}% = {potential_savings:,.0f}원</span>
-                <div class="stat-value" style="color: #16a34a;">{potential_savings:,.0f}원</div>
+                <div class="stat-value">{potential_savings:,.0f}원</div>
                 <div class="stat-label">예상 절감액 ⓘ</div>
             </div>
         </div>

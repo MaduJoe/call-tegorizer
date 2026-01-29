@@ -59,7 +59,9 @@ class StatisticsTab:
                 height=530,
                 margin=dict(t=30, b=30, l=30, r=30),
                 xaxis_title="카테고리",
-                yaxis_title="건수"
+                yaxis_title="건수",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
             )
         return fig
 
@@ -111,6 +113,7 @@ class StatisticsTab:
         fig.update_layout(
             height=500,
             margin=dict(t=30, b=30, l=30, r=30),
+            paper_bgcolor='rgba(0,0,0,0)',
         )
 
         return fig
@@ -136,7 +139,9 @@ class StatisticsTab:
                 height=400,
                 margin=dict(t=20, b=40),
                 xaxis_title="",
-                yaxis_title="건수"
+                yaxis_title="건수",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
             )
         return fig
 
@@ -161,7 +166,9 @@ class StatisticsTab:
                 height=400,
                 margin=dict(t=20, b=40),
                 xaxis_title="",
-                yaxis_title="건수"
+                yaxis_title="건수",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
             )
         return fig
 
@@ -170,31 +177,31 @@ class StatisticsTab:
         stats = self.get_statistics()
 
         gr.HTML(f"""
-        <div style="margin-bottom: 24px;">
-            <h2 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 600; color: #1e293b;">통계 분석</h2>
-            <p style="color: #64748b; margin: 0;">총 {stats.get('total_calls', 0)}건의 통화 데이터 분석 결과</p>
+        <div class="stats-header">
+            <h2 class="text-title">통계 분석</h2>
+            <p class="text-subtitle">총 {stats.get('total_calls', 0)}건의 통화 데이터 분석 결과</p>
         </div>
         """)
 
         with gr.Row():
             with gr.Column():
-                gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">📊 카테고리별 분포</h3>')
+                gr.HTML('<div class="chart-container"><h3 class="chart-title">📊 카테고리별 분포</h3>')
                 category_chart = gr.Plot(value=self.create_category_chart())
                 gr.HTML('</div>')
 
             with gr.Column():
-                gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">🌐 카테고리 상세</h3><p style="color: #64748b; font-size: 13px; margin-top: 4px;">클릭하여 세부 카테고리 확인</p>')
+                gr.HTML('<div class="chart-container"><h3 class="chart-title">🌐 카테고리 상세</h3><p class="chart-subtitle">클릭하여 세부 카테고리 확인</p>')
                 sunburst_chart = gr.Plot(value=self.create_category_sunburst())
                 gr.HTML('</div>')
 
         with gr.Row():
             with gr.Column():
-                gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">😊 감정 분포</h3>')
+                gr.HTML('<div class="chart-container"><h3 class="chart-title">😊 감정 분포</h3>')
                 sentiment_chart = gr.Plot(value=self.create_sentiment_chart())
                 gr.HTML('</div>')
 
             with gr.Column():
-                gr.HTML('<div class="chart-container"><h3 style="margin-top:0; color: #1e293b;">✅ 해결 현황</h3>')
+                gr.HTML('<div class="chart-container"><h3 class="chart-title">✅ 해결 현황</h3>')
                 resolution_chart = gr.Plot(value=self.create_resolution_chart())
                 gr.HTML('</div>')
 

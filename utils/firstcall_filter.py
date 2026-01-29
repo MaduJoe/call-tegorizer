@@ -68,25 +68,69 @@ def get_all_not_firstcall_ids(excel_path: str = None) -> Dict[str, Set[str]]:
     }
 
 
-def filter_call_ids(call_ids: list, day: str, only_not_firstcall: bool = False, excel_path: str = None) -> list:
+def get_firstcall_ids(day: str, excel_path: str = None) -> Set[str]:
+    """
+    특정 일자의 첫콜=Y인 call_id 목록 반환
+
+    Args:
+        day: 일자 (예: "02", "05")
+        excel_path: Excel 파일 경로 (기본: firstcall_report.xlsx)
+
+    Returns:
+        Set of call_ids where 첫콜=Y
+    """
+    firstcall_data = load_firstcall_data(excel_path)
+
+    if day not in firstcall_data:
+        return set()
+
+    return {
+        filename for filename, is_firstcall in firstcall_data[day].items()
+        if is_firstcall  # 첫콜=Y
+    }
+
+
+def get_all_firstcall_ids(excel_path: str = None) -> Dict[str, Set[str]]:
+    """
+    모든 일자의 첫콜=Y인 call_id 목록 반환
+
+    Returns:
+        {day: Set of call_ids where 첫콜=Y}
+    """
+    firstcall_data = load_firstcall_data(excel_path)
+
+    return {
+        day: {
+            filename for filename, is_firstcall in data.items()
+            if is_firstcall
+        }
+        for day, data in firstcall_data.items()
+    }
+
+
+def filter_call_ids(call_ids: list, day: str, only_not_firstcall: bool = False, only_firstcall: bool = False, excel_path: str = None) -> list:
     """
     call_id 목록을 첫콜 여부로 필터링
 
     Args:
         call_ids: 필터링할 call_id 목록
         day: 일자 (예: "02", "05")
-        only_not_firstcall: True면 첫콜=N인 것만 반환
+        only_not_firstcall: True면 첫콜=N(재콜)인 것만 반환
+        only_firstcall: True면 첫콜=Y인 것만 반환
         excel_path: Excel 파일 경로
 
     Returns:
         필터링된 call_id 목록
     """
-    if not only_not_firstcall:
-        return call_ids
+    if only_firstcall:
+        firstcall_ids = get_firstcall_ids(day, excel_path)
+        return [cid for cid in call_ids if cid in firstcall_ids]
 
-    not_firstcall_ids = get_not_firstcall_ids(day, excel_path)
+    if only_not_firstcall:
+        not_firstcall_ids = get_not_firstcall_ids(day, excel_path)
+        return [cid for cid in call_ids if cid in not_firstcall_ids]
 
-    return [cid for cid in call_ids if cid in not_firstcall_ids]
+    return call_ids
 
 
 if __name__ == "__main__":

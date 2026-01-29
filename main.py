@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import asyncio
+import random
 from operators import STTProcessor, CallAnalyzer
 from config import get_config
 import time
@@ -34,6 +35,21 @@ class ProgressTracker:
             eta = ""
 
         return f"[{self.phase.upper()}] {processed}/{self.total} ({percent:.1f}%) - 완료: {self.completed}, 스킵: {self.skipped}{eta}"
+
+
+def parse_sample_config(sample_str: str) -> dict:
+    """
+    샘플 설정 문자열 파싱
+    예: "03:109,04:538,05:556" -> {"03": 109, "04": 538, "05": 556}
+    """
+    if not sample_str:
+        return {}
+
+    config = {}
+    for item in sample_str.split(","):
+        day, count = item.strip().split(":")
+        config[day.strip()] = int(count.strip())
+    return config
 
 
 def get_day_folders(input_path: Path):
@@ -249,7 +265,7 @@ async def process_call(call_info, stt, analyzer, output_path, stt_lock, progress
     return result
 
 
-async def process_batch(input_dir: str = None, output_dir: str = None, phase: str = "all", not_firstcall: bool = False, only_firstcall: bool = False, priority_dir: str = None, only_dir: str = None):
+async def process_batch(input_dir: str = None, output_dir: str = None, phase: str = "all", not_firstcall: bool = False, only_firstcall: bool = False, priority_dir: str = None, only_dir: str = None, sample_config: dict = None):
     """
     Phase 기반 배치 처리
     - phase="stt": STT만 처리 (Ollama 정지 상태에서 실행 권장)
@@ -258,6 +274,7 @@ async def process_batch(input_dir: str = None, output_dir: str = None, phase: st
     - not_firstcall: True면 첫콜=N(재콜)인 건만 처리
     - only_firstcall: True면 첫콜=Y인 건만 처리
     - only_dir: 특정 날짜만 처리 (예: "01/05")
+    - sample_config: 날짜별 샘플 수 설정 (예: {"03": 109, "04": 538})
     """
     input_path = Path(input_dir)
     output_path = Path(output_dir)
@@ -278,18 +295,18 @@ async def process_batch(input_dir: str = None, output_dir: str = None, phase: st
 
     # Phase별 처리
     if phase == "stt":
-        await process_phase_stt(input_path, output_path, stt, stt_lock, not_firstcall, only_firstcall, only_dir)
+        await process_phase_stt(input_path, output_path, stt, stt_lock, not_firstcall, only_firstcall, only_dir, sample_config)
     elif phase == "llm":
-        await process_phase_llm(output_path, analyzer, not_firstcall, only_firstcall, priority_dir, only_dir)
+        await process_phase_llm(output_path, analyzer, not_firstcall, only_firstcall, priority_dir, only_dir, sample_config)
     else:  # all
         await process_phase_all(input_path, output_path, stt, analyzer, stt_lock, not_firstcall, only_firstcall, only_dir)
 
     print(f"\n{'='*60}\nAll processing completed!\n{'='*60}")
 
 
-async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, not_firstcall: bool = False, only_firstcall: bool = False, only_dir: str = None):
+async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, not_firstcall: bool = False, only_firstcall: bool = False, only_dir: str = None, sample_config: dict = None):
     """Phase 1: STT만 처리"""
-    from utils.firstcall_filter import filter_call_ids
+    from utils.firstcall_filter import filter_call_ids, get_all_firstcall_ids, get_all_not_firstcall_ids
 
     day_folders = get_day_folders(input_path)
 
@@ -303,22 +320,78 @@ async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, 
 
     # 전체 call 수 계산
     all_calls = []
-    for day_folder in day_folders:
-        day_info = collect_call_ids(day_folder)
-        # 첫콜 필터링 적용
-        filtered_call_ids = filter_call_ids(
-            day_info["call_ids"],
-            day_info["day"],
-            only_not_firstcall=not_firstcall,
-            only_firstcall=only_firstcall
-        )
-        for call_id in filtered_call_ids:
-            all_calls.append({
-                "day_folder": day_info["day_folder"],
-                "month": day_info["month"],
-                "day": day_info["day"],
-                "call_id": call_id
-            })
+
+    # 샘플링 적용 (--sample 옵션): 날짜별 첫콜/재콜 N개씩 선택
+    if sample_config:
+        firstcall_ids = get_all_firstcall_ids()
+        not_firstcall_ids = get_all_not_firstcall_ids()
+        random.seed(42)
+
+        for day_folder in day_folders:
+            day_info = collect_call_ids(day_folder)
+            day = day_info["day"]
+
+            if day not in sample_config:
+                continue
+
+            target_count = sample_config[day]
+
+            # 이미 처리된 파일 확인
+            existing_transcripts = {
+                f.stem.replace('.transcript', '')
+                for f in (output_path / day_info["month"] / day).glob('*.transcript.json')
+            } if (output_path / day_info["month"] / day).exists() else set()
+
+            # 첫콜/재콜 분류
+            day_firstcall_ids = []
+            day_recall_ids = []
+            for call_id in day_info["call_ids"]:
+                if day in firstcall_ids and call_id in firstcall_ids[day]:
+                    day_firstcall_ids.append(call_id)
+                elif day in not_firstcall_ids and call_id in not_firstcall_ids[day]:
+                    day_recall_ids.append(call_id)
+
+            # 이미 처리된 것과 미처리된 것 분리
+            existing_firstcall = [cid for cid in day_firstcall_ids if cid in existing_transcripts]
+            existing_recall = [cid for cid in day_recall_ids if cid in existing_transcripts]
+            pending_firstcall = [cid for cid in day_firstcall_ids if cid not in existing_transcripts]
+            pending_recall = [cid for cid in day_recall_ids if cid not in existing_transcripts]
+
+            # 추가로 필요한 개수 계산
+            need_firstcall = max(0, target_count - len(existing_firstcall))
+            need_recall = max(0, target_count - len(existing_recall))
+
+            # 미처리 건 중에서 랜덤 선택
+            selected_firstcall = random.sample(pending_firstcall, min(need_firstcall, len(pending_firstcall)))
+            selected_recall = random.sample(pending_recall, min(need_recall, len(pending_recall)))
+
+            print(f"Day {day}: 첫콜 기존 {len(existing_firstcall)} + 추가 {len(selected_firstcall)}/{need_firstcall}, "
+                  f"재콜 기존 {len(existing_recall)} + 추가 {len(selected_recall)}/{need_recall}")
+
+            for call_id in selected_firstcall + selected_recall:
+                all_calls.append({
+                    "day_folder": day_info["day_folder"],
+                    "month": day_info["month"],
+                    "day": day,
+                    "call_id": call_id
+                })
+    else:
+        for day_folder in day_folders:
+            day_info = collect_call_ids(day_folder)
+            # 첫콜 필터링 적용
+            filtered_call_ids = filter_call_ids(
+                day_info["call_ids"],
+                day_info["day"],
+                only_not_firstcall=not_firstcall,
+                only_firstcall=only_firstcall
+            )
+            for call_id in filtered_call_ids:
+                all_calls.append({
+                    "day_folder": day_info["day_folder"],
+                    "month": day_info["month"],
+                    "day": day_info["day"],
+                    "call_id": call_id
+                })
 
     filter_msg = " (첫콜=N만)" if not_firstcall else (" (첫콜=Y만)" if only_firstcall else "")
     print(f"Total {len(all_calls)} calls to process (STT phase){filter_msg}")
@@ -329,7 +402,7 @@ async def process_phase_stt(input_path: Path, output_path: Path, stt, stt_lock, 
         await process_call_stt_only(call_info, stt, output_path, stt_lock, progress)
 
 
-async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = False, only_firstcall: bool = False, priority_dir: str = None, only_dir: str = None):
+async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = False, only_firstcall: bool = False, priority_dir: str = None, only_dir: str = None, sample_config: dict = None):
     """Phase 2: LLM만 처리 (.transcript.json 파일 기반)"""
     from utils.firstcall_filter import get_all_not_firstcall_ids, get_all_firstcall_ids
 
@@ -353,8 +426,42 @@ async def process_phase_llm(output_path: Path, analyzer, not_firstcall: bool = F
         stt_files = sorted(stt_files, key=priority_sort)
         print(f"Priority directory: {priority_dir}")
 
-    # 첫콜 필터링 적용
-    if not_firstcall:
+    # 샘플링 적용 (--sample 옵션): 날짜별 첫콜/재콜 N개씩 선택
+    if sample_config:
+        firstcall_ids = get_all_firstcall_ids()
+        not_firstcall_ids = get_all_not_firstcall_ids()
+
+        sampled_files = []
+        random.seed(42)  # 재현성을 위한 시드 고정
+
+        for day, count in sample_config.items():
+            # 해당 날짜의 파일만 필터링
+            day_files = [f for f in stt_files if f.parent.name == day]
+
+            # 첫콜/재콜 분류
+            day_firstcall = []
+            day_recall = []
+            for f in day_files:
+                call_id = f.stem.replace('.transcript', '')
+                if day in firstcall_ids and call_id in firstcall_ids[day]:
+                    day_firstcall.append(f)
+                elif day in not_firstcall_ids and call_id in not_firstcall_ids[day]:
+                    day_recall.append(f)
+
+            # 각각 N개씩 랜덤 선택
+            selected_firstcall = random.sample(day_firstcall, min(count, len(day_firstcall)))
+            selected_recall = random.sample(day_recall, min(count, len(day_recall)))
+
+            print(f"Day {day}: 첫콜 {len(selected_firstcall)}/{len(day_firstcall)}, 재콜 {len(selected_recall)}/{len(day_recall)} 선택")
+
+            sampled_files.extend(selected_firstcall)
+            sampled_files.extend(selected_recall)
+
+        stt_files = sampled_files
+        print(f"Total sampled: {len(stt_files)} files")
+
+    # 첫콜 필터링 적용 (--sample과 함께 사용되지 않을 때만)
+    elif not_firstcall:
         not_firstcall_ids = get_all_not_firstcall_ids()
         filtered_files = []
         for stt_file in stt_files:
@@ -501,6 +608,9 @@ if __name__ == "__main__":
     parser.add_argument("--priority", type=str, help="우선 처리할 디렉토리 경로 (예: 01/04)")
     parser.add_argument("--only", type=str, help="특정 날짜만 처리 (예: 01/05)")
 
+    # 샘플링 옵션
+    parser.add_argument("--sample", type=str, help="날짜별 첫콜/재콜 샘플 수 (예: 03:109,04:538,05:556)")
+
     args = parser.parse_args()
 
     # 실행 모드 결정
@@ -541,6 +651,14 @@ if __name__ == "__main__":
         if args.only:
             print(f"\n📁 대상 날짜: {args.only}만 처리")
 
+        # 샘플링 설정 파싱
+        sample_config = None
+        if args.sample:
+            sample_config = parse_sample_config(args.sample)
+            print(f"\n🎲 샘플링 설정:")
+            for day, count in sample_config.items():
+                print(f"   - {day}일: 첫콜/재콜 각 {count}개")
+
         print(f"\n{'='*60}\n")
 
-        asyncio.run(process_batch(args.input_dir, args.output_dir, phase, args.not_firstcall, args.firstcall, args.priority, args.only))
+        asyncio.run(process_batch(args.input_dir, args.output_dir, phase, args.not_firstcall, args.firstcall, args.priority, args.only, sample_config))
