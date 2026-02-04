@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from collections import Counter
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from config import get_config
 from .cost_analysis_tab import CostAnalysisTab
 
@@ -104,6 +105,18 @@ class CallAnalyticsDashboard:
         except Exception as e:
             print(f"transcript 로드 실패: {file_path} - {e}")
             return []
+
+    def _get_call_duration(self, file_path: str) -> float:
+        """통화 시간(초) 계산 - transcript의 마지막 세그먼트 end 값"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                merged = data.get('transcript', {}).get('merged', [])
+                if merged:
+                    return max(seg.get('end', 0) for seg in merged)
+        except Exception as e:
+            pass
+        return 0
 
     def refresh_cache(self, force: bool = False):
         """캐시 새로고침 (force=True면 전체 재구축)"""
@@ -340,6 +353,7 @@ class CallAnalyticsDashboard:
         search_query: str,
         date_filter: str,
         category_filter: str,
+        sub_category_filter: str,
         resolution_filter: str,
         sentiment_filter: str,
         tag_filter: str = "전체",
@@ -372,6 +386,8 @@ class CallAnalyticsDashboard:
             df = df[df['날짜'] == date_filter]
         if category_filter and category_filter != "전체":
             df = df[df['카테고리'] == category_filter]
+        if sub_category_filter and sub_category_filter != "전체":
+            df = df[df['세부'] == sub_category_filter]
         if resolution_filter and resolution_filter != "전체":
             df = df[df['상태'].str.contains(resolution_filter.replace('해결됨', '해결').replace('진행중', '진행중').replace('후속조치필요', '후속'), na=False)]
         if sentiment_filter and sentiment_filter != "전체":
@@ -409,6 +425,12 @@ class CallAnalyticsDashboard:
                 tags = call.get('analysis', {}).get('tags', [])
                 for tag in tags:
                     values.add(tag)
+            elif column == '세부':
+                sub_cat = call.get('analysis', {}).get('sub_category')
+                if not sub_cat:
+                    sub_cat = call.get('analysis', {}).get('inquiry_type')
+                if sub_cat:
+                    values.add(sub_cat)
 
         return sorted([v for v in values if v and v != 'N/A'])
 
@@ -582,14 +604,14 @@ class CallAnalyticsDashboard:
         return fig
 
     def create_category_sunburst(self, call_type_filter: str = "전체"):
-        """카테고리 Sunburst 차트 (계층 구조)
+        """카테고리 Sunburst 차트 (계층 구조) - 평균 통화 시간 포함
 
         Args:
             call_type_filter: "전체", "첫콜", "재콜" 중 선택
         """
         calls = self.load_all_calls()
         if not calls:
-            fig = px.sunburst(title="데이터 없음")
+            fig = go.Figure(go.Sunburst())
             fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
             return fig
 
@@ -599,48 +621,123 @@ class CallAnalyticsDashboard:
         elif call_type_filter == "재콜":
             calls = [c for c in calls if c.get('_is_firstcall') is False]
 
-        # 카테고리 → 세부 카테고리 계층 데이터 구성
+        # 카테고리 → 세부 카테고리 계층 데이터 구성 (통화 시간 포함)
         hierarchy_data = []
         for call in calls:
             analysis = call.get('analysis', {})
             category = analysis.get('category')
             sub_category = analysis.get('sub_category')
+            file_path = call.get('_file_path', '')
 
             if category and category != 'N/A':
+                duration = self._get_call_duration(file_path) if file_path else 0
                 hierarchy_data.append({
                     'category': category,
                     'sub_category': sub_category if sub_category and sub_category != 'N/A' else '(미분류)',
+                    'duration': duration,
                 })
 
         if not hierarchy_data:
-            fig = px.sunburst(title="데이터 없음")
+            fig = go.Figure(go.Sunburst())
             fig.update_layout(paper_bgcolor='rgba(0,0,0,0)')
             return fig
 
         df = pd.DataFrame(hierarchy_data)
 
-        # 카테고리별, 세부 카테고리별 건수 집계
-        counts = df.groupby(['category', 'sub_category']).size().reset_index(name='count')
+        # 세부 카테고리별 집계
+        sub_counts = df.groupby(['category', 'sub_category']).agg(
+            count=('category', 'size'),
+            avg_duration=('duration', 'mean')
+        ).reset_index()
 
-        # Sunburst 차트 생성
-        fig = px.sunburst(
-            counts,
-            path=['category', 'sub_category'],
-            values='count',
-            color='category',
-            color_discrete_map={
-                '인터넷': '#3b82f6',
-                '렌탈': '#8b5cf6',
-                '모바일': '#06b6d4',
-                '기타': '#6b7280',
-            }
-        )
+        # 카테고리별 집계
+        cat_counts = df.groupby('category').agg(
+            count=('category', 'size'),
+            avg_duration=('duration', 'mean')
+        ).reset_index()
 
-        fig.update_traces(
-            textinfo='label+value+percent entry',
+        # 평균 시간을 분:초 형식으로 변환
+        def format_duration(seconds):
+            if pd.isna(seconds) or seconds == 0:
+                return "0:00"
+            minutes = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{minutes}:{secs:02d}"
+
+        # 동적 색상 팔레트 - 카테고리 수에 맞게 자동 할당
+        # 서로 구분되는 색상 팔레트 (메인 색상, 서브 색상)
+        color_palette = [
+            ['#3b82f6', '#93c5fd'],  # blue
+            ['#8b5cf6', '#c4b5fd'],  # purple
+            ['#06b6d4', '#67e8f9'],  # cyan
+            ['#f59e0b', '#fcd34d'],  # amber
+            ['#10b981', '#6ee7b7'],  # emerald
+            ['#ef4444', '#fca5a5'],  # red
+            ['#ec4899', '#f9a8d4'],  # pink
+            ['#84cc16', '#bef264'],  # lime
+            ['#14b8a6', '#5eead4'],  # teal
+            ['#f97316', '#fdba74'],  # orange
+            ['#6366f1', '#a5b4fc'],  # indigo
+            ['#a855f7', '#d8b4fe'],  # violet
+            ['#0ea5e9', '#7dd3fc'],  # sky
+            ['#22c55e', '#86efac'],  # green
+            ['#eab308', '#fde047'],  # yellow
+        ]
+
+        # 모든 고유 카테고리 추출하고 색상 동적 할당
+        unique_categories = cat_counts['category'].unique().tolist()
+        color_map = {}
+        for i, cat in enumerate(unique_categories):
+            color_map[cat] = color_palette[i % len(color_palette)]
+
+        # go.Sunburst 데이터 구성
+        ids = []
+        labels = []
+        parents = []
+        values = []
+        colors = []
+        customdata = []
+
+        total_count = df.shape[0]
+
+        # 카테고리 노드 추가 (메인 색상)
+        for _, row in cat_counts.iterrows():
+            cat = row['category']
+            ids.append(cat)
+            labels.append(cat)
+            parents.append('')
+            values.append(row['count'])
+            cat_colors = color_map.get(cat, ['#9ca3af', '#e5e7eb'])
+            colors.append(cat_colors[0])  # 메인 색상
+            customdata.append(format_duration(row['avg_duration']))
+
+        # 세부 카테고리 노드 추가 (서브 색상)
+        for _, row in sub_counts.iterrows():
+            cat = row['category']
+            sub_cat = row['sub_category']
+            ids.append(f"{cat}/{sub_cat}")
+            labels.append(sub_cat)
+            parents.append(cat)
+            values.append(row['count'])
+            cat_colors = color_map.get(cat, ['#9ca3af', '#e5e7eb'])
+            colors.append(cat_colors[1])  # 서브 색상
+            customdata.append(format_duration(row['avg_duration']))
+
+        fig = go.Figure(go.Sunburst(
+            ids=ids,
+            labels=labels,
+            parents=parents,
+            values=values,
+            marker=dict(
+                colors=colors,
+                line=dict(color='white', width=1),
+            ),
+            customdata=customdata,
+            branchvalues='total',
+            texttemplate='%{label}<br>%{value}건 (%{percentEntry:.1%})<br>⏱️%{customdata}',
+            hovertemplate='<b>%{label}</b><br>건수: %{value}건<br>비율: %{percentEntry:.1%}<br>평균 통화시간: %{customdata}<extra></extra>',
             insidetextorientation='radial',
-            texttemplate='%{label}<br>%{value}건<br>(%{percentEntry:.1%})',
-        )
+        ))
 
         fig.update_layout(
             height=500,
@@ -682,16 +779,19 @@ class CallAnalyticsDashboard:
             else:
                 calls = all_calls
 
-            # 카테고리 → 세부 카테고리 계층 데이터 구성
+            # 카테고리 → 세부 카테고리 계층 데이터 구성 (통화 시간 포함)
             hierarchy_data = []
             for call in calls:
                 analysis = call.get('analysis', {})
                 category = analysis.get('category')
                 sub_category = analysis.get('sub_category')
+                file_path = call.get('_file_path', '')
                 if category and category != 'N/A':
+                    duration = self._get_call_duration(file_path) if file_path else 0
                     hierarchy_data.append({
                         '카테고리': category,
                         '세부카테고리': sub_category if sub_category and sub_category != 'N/A' else '(미분류)',
+                        'duration': duration,
                     })
 
             # 시트 생성
@@ -702,16 +802,39 @@ class CallAnalyticsDashboard:
                 continue
 
             df = pd.DataFrame(hierarchy_data)
-            counts = df.groupby(['카테고리', '세부카테고리']).size().reset_index(name='건수')
-            category_totals = counts.groupby('카테고리')['건수'].sum().reset_index()
+
+            # 세부 카테고리별 집계 (건수 + 평균 통화시간)
+            counts = df.groupby(['카테고리', '세부카테고리']).agg(
+                건수=('카테고리', 'size'),
+                avg_duration=('duration', 'mean')
+            ).reset_index()
+
+            # 카테고리별 집계 (소계)
+            category_totals = df.groupby('카테고리').agg(
+                건수=('카테고리', 'size'),
+                avg_duration=('duration', 'mean')
+            ).reset_index()
             category_totals['세부카테고리'] = '(소계)'
 
             grand_total = counts['건수'].sum()
+            grand_avg_duration = df['duration'].mean()
+
             counts['비율'] = (counts['건수'] / grand_total * 100).round(1).astype(str) + '%'
             category_totals['비율'] = (category_totals['건수'] / grand_total * 100).round(1).astype(str) + '%'
 
+            # 평균 시간을 분:초 형식으로 변환
+            def format_duration(seconds):
+                if pd.isna(seconds) or seconds == 0:
+                    return "0:00"
+                minutes = int(seconds // 60)
+                secs = int(seconds % 60)
+                return f"{minutes}:{secs:02d}"
+
+            counts['평균통화시간'] = counts['avg_duration'].apply(format_duration)
+            category_totals['평균통화시간'] = category_totals['avg_duration'].apply(format_duration)
+
             # 헤더 작성
-            for col, header in enumerate(['카테고리', '세부카테고리', '건수', '비율'], 1):
+            for col, header in enumerate(['카테고리', '세부카테고리', '건수', '비율', '평균통화시간'], 1):
                 cell = ws.cell(row=1, column=col, value=header)
                 cell.font = header_font
                 cell.fill = header_fill
@@ -728,31 +851,35 @@ class CallAnalyticsDashboard:
                     ws.cell(row=row_idx, column=2, value=row['세부카테고리'])
                     ws.cell(row=row_idx, column=3, value=row['건수'])
                     ws.cell(row=row_idx, column=4, value=row['비율'])
+                    ws.cell(row=row_idx, column=5, value=row['평균통화시간'])
                     row_idx += 1
 
                 # 카테고리 소계
-                for col in range(1, 5):
+                for col in range(1, 6):
                     ws.cell(row=row_idx, column=col).fill = subtotal_fill
                 ws.cell(row=row_idx, column=1, value=cat_total['카테고리'])
                 ws.cell(row=row_idx, column=2, value=cat_total['세부카테고리'])
                 ws.cell(row=row_idx, column=3, value=cat_total['건수'])
                 ws.cell(row=row_idx, column=4, value=cat_total['비율'])
+                ws.cell(row=row_idx, column=5, value=cat_total['평균통화시간'])
                 row_idx += 1
 
             # 전체 합계
-            for col in range(1, 5):
+            for col in range(1, 6):
                 ws.cell(row=row_idx, column=col).fill = total_fill
                 ws.cell(row=row_idx, column=col).font = total_font
             ws.cell(row=row_idx, column=1, value='합계')
             ws.cell(row=row_idx, column=2, value='')
             ws.cell(row=row_idx, column=3, value=grand_total)
             ws.cell(row=row_idx, column=4, value='100%')
+            ws.cell(row=row_idx, column=5, value=format_duration(grand_avg_duration))
 
             # 열 너비 조정
             ws.column_dimensions['A'].width = 15
             ws.column_dimensions['B'].width = 25
             ws.column_dimensions['C'].width = 10
             ws.column_dimensions['D'].width = 10
+            ws.column_dimensions['E'].width = 12
 
         # 임시 파일로 저장
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
@@ -1142,6 +1269,20 @@ class CallAnalyticsDashboard:
             </div>
             """)
 
+            # 데이터 기간 헤더
+            dates = self.get_column_unique_values("날짜")
+            if dates:
+                date_range = f"{dates[0]} ~ {dates[-1]}"
+            else:
+                date_range = "데이터 없음"
+
+            gr.HTML(f"""
+            <div class="dashboard-header">
+                <h1 class="dashboard-title">📞 인콜 데이터 분석 리포트</h1>
+                <p class="dashboard-subtitle">{date_range} 기간 통화 데이터 취합</p>
+            </div>
+            """)
+
             # 숨겨진 필터 트리거 (stat-card 클릭 → Radio 값 변경)
             stat_card_filter = gr.Textbox(
                 value="",
@@ -1184,6 +1325,13 @@ class CallAnalyticsDashboard:
                             choices=["전체"] + self.get_column_unique_values("카테고리"),
                             value="전체",
                             label="카테고리",
+                            scale=1,
+                            elem_classes="filter-dropdown"
+                        )
+                        sub_category_filter = gr.Dropdown(
+                            choices=["전체"] + self.get_column_unique_values("세부"),
+                            value="전체",
+                            label="세부",
                             scale=1,
                             elem_classes="filter-dropdown"
                         )
@@ -1267,9 +1415,9 @@ class CallAnalyticsDashboard:
                             return self._empty_detail_html(), ""
                         return self.format_detail_html(int(row_num))
 
-                    def apply_filters(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, page_n):
+                    def apply_filters(search, date_f, cat_f, sub_cat_f, res_f, sent_f, tag_f, firstcall_f, page_n):
                         page = max(0, int(page_n) - 1) if page_n else 0
-                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, page)
+                        df, total = self.get_filtered_df(search, date_f, cat_f, sub_cat_f, res_f, sent_f, tag_f, firstcall_f, page)
 
                         # Calculate pagination info
                         start_idx = page * self.page_size + 1
@@ -1280,9 +1428,9 @@ class CallAnalyticsDashboard:
 
                         return df, info, total, df  # Also return df for current_df state
 
-                    def go_prev_page(page_n, search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f):
+                    def go_prev_page(page_n, search, date_f, cat_f, sub_cat_f, res_f, sent_f, tag_f, firstcall_f):
                         new_page = max(1, int(page_n) - 1)
-                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, new_page - 1)
+                        df, total = self.get_filtered_df(search, date_f, cat_f, sub_cat_f, res_f, sent_f, tag_f, firstcall_f, new_page - 1)
 
                         start_idx = (new_page - 1) * self.page_size + 1
                         end_idx = min(new_page * self.page_size, total)
@@ -1292,10 +1440,10 @@ class CallAnalyticsDashboard:
 
                         return df, new_page, info, df  # Also return df for current_df state
 
-                    def go_next_page(page_n, total_count, search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f):
+                    def go_next_page(page_n, total_count, search, date_f, cat_f, sub_cat_f, res_f, sent_f, tag_f, firstcall_f):
                         total_pages = (total_count + self.page_size - 1) // self.page_size
                         new_page = min(total_pages, int(page_n) + 1)
-                        df, total = self.get_filtered_df(search, date_f, cat_f, res_f, sent_f, tag_f, firstcall_f, new_page - 1)
+                        df, total = self.get_filtered_df(search, date_f, cat_f, sub_cat_f, res_f, sent_f, tag_f, firstcall_f, new_page - 1)
 
                         start_idx = (new_page - 1) * self.page_size + 1
                         end_idx = min(new_page * self.page_size, total)
@@ -1314,6 +1462,7 @@ class CallAnalyticsDashboard:
                             df,
                             gr.Dropdown(choices=["전체"] + self.get_column_unique_values("날짜"), value="전체"),
                             gr.Dropdown(choices=["전체"] + self.get_column_unique_values("카테고리"), value="전체"),
+                            gr.Dropdown(choices=["전체"] + self.get_column_unique_values("세부"), value="전체"),
                             self._empty_detail_html(),
                             "",
                             1,
@@ -1336,10 +1485,10 @@ class CallAnalyticsDashboard:
                     )
 
                     # Auto-filter on input change (reset to page 1)
-                    for filter_input in [search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter]:
+                    for filter_input in [search_input, date_filter, category_filter, sub_category_filter, resolution_filter, sentiment_filter, tag_filter]:
                         filter_input.change(
-                            fn=lambda s, d, c, r, se, t, fc: apply_filters(s, d, c, r, se, t, fc, 1),
-                            inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
+                            fn=lambda s, d, c, sc, r, se, t, fc: apply_filters(s, d, c, sc, r, se, t, fc, 1),
+                            inputs=[search_input, date_filter, category_filter, sub_category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                             outputs=[call_table, pagination_info, current_total, current_df]
                         ).then(
                             fn=lambda: 1,
@@ -1348,8 +1497,8 @@ class CallAnalyticsDashboard:
 
                     # Firstcall toggle change
                     firstcall_toggle.change(
-                        fn=lambda s, d, c, r, se, t, fc: apply_filters(s, d, c, r, se, t, fc, 1),
-                        inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
+                        fn=lambda s, d, c, sc, r, se, t, fc: apply_filters(s, d, c, sc, r, se, t, fc, 1),
+                        inputs=[search_input, date_filter, category_filter, sub_category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                         outputs=[call_table, pagination_info, current_total, current_df]
                     ).then(
                         fn=lambda: 1,
@@ -1359,20 +1508,20 @@ class CallAnalyticsDashboard:
                     # Page number change
                     page_num.change(
                         fn=apply_filters,
-                        inputs=[search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle, page_num],
+                        inputs=[search_input, date_filter, category_filter, sub_category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle, page_num],
                         outputs=[call_table, pagination_info, current_total, current_df]
                     )
 
                     # Previous/Next buttons
                     prev_btn.click(
                         fn=go_prev_page,
-                        inputs=[page_num, search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
+                        inputs=[page_num, search_input, date_filter, category_filter, sub_category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                         outputs=[call_table, page_num, pagination_info, current_df]
                     )
 
                     next_btn.click(
                         fn=go_next_page,
-                        inputs=[page_num, current_total, search_input, date_filter, category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
+                        inputs=[page_num, current_total, search_input, date_filter, category_filter, sub_category_filter, resolution_filter, sentiment_filter, tag_filter, firstcall_toggle],
                         outputs=[call_table, page_num, pagination_info, current_df]
                     )
 
@@ -1427,8 +1576,11 @@ class CallAnalyticsDashboard:
                                     elem_classes="firstcall-toggle",
                                     container=False
                                 )
+                                # 초기 파일 생성하여 첫 클릭에서 바로 다운로드 가능하게 함
+                                initial_excel = self.export_sunburst_to_excel("전체")
                                 sunburst_download_btn = gr.DownloadButton(
                                     "Download Excel",
+                                    value=initial_excel,
                                     size="lg",
                                     elem_classes="download-btn"
                                 )
@@ -1474,13 +1626,13 @@ class CallAnalyticsDashboard:
                         outputs=[sunburst_chart]
                     )
 
-                    # Sunburst Excel 다운로드 - DownloadButton 이벤트
-                    def download_sunburst_excel(call_type_filter):
+                    # Sunburst 필터 변경 시 다운로드 버튼 파일도 업데이트
+                    def update_sunburst_excel(call_type_filter):
                         file_path = self.export_sunburst_to_excel(call_type_filter)
                         return file_path
 
-                    sunburst_download_btn.click(
-                        fn=download_sunburst_excel,
+                    sunburst_filter.change(
+                        fn=update_sunburst_excel,
                         inputs=[sunburst_filter],
                         outputs=[sunburst_download_btn]
                     )
