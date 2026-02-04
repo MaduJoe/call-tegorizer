@@ -1661,3 +1661,25 @@ body.dark .stat-card-success .stat-value {
 .dark .js-plotly-plot .plotly .zerolinelayer path {
     stroke: #475569 !important;
 }
+
+/* ==================== DASHBOARD HEADER ==================== */
+.dashboard-header {
+    text-align: center;
+    padding: 24px 20px 16px;
+    margin-bottom: 8px;
+}
+
+.dashboard-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 8px 0;
+    letter-spacing: -0.02em;
+}
+
+.dashboard-subtitle {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    margin: 0;
+    font-weight: 500;
+}
