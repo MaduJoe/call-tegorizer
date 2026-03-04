@@ -9,6 +9,7 @@
 - [주요 기능](#주요-기능)
 - [기술 스택](#기술-스택)
 - [설치 및 실행](#설치-및-실행)
+- [STT REST API](#5-stt-rest-api-서버)
 - [프로젝트 구조](#프로젝트-구조)
 - [확장 가능성](#확장-가능성)
 - [출력 데이터 구조](#출력-데이터-구조)
@@ -217,6 +218,72 @@ python dashboard.py
 # 브라우저에서 자동 오픈: http://localhost:7860
 ```
 
+### 5. STT REST API 서버
+
+외부 시스템에서 STT 기능을 API로 호출할 수 있습니다.
+
+#### 서버 실행
+```bash
+python stt_api.py
+# 기본 포트: 8000
+```
+
+#### 서버 종료
+```bash
+pkill -f "stt_api"
+```
+
+#### API 엔드포인트
+
+| 엔드포인트 | 메서드 | 설명 |
+|-----------|--------|------|
+| `/health` | GET | 서버 상태 확인 |
+| `/models` | GET | 사용 가능한 모델 목록 |
+| `/transcribe` | POST | 단일 파일 STT |
+| `/transcribe_conversation` | POST | 2채널 대화 STT |
+| `/docs` | GET | Swagger UI (API 문서) |
+
+#### curl 사용 예시
+
+```bash
+# 상태 확인
+curl http://localhost:8000/health
+
+# 모델 목록
+curl http://localhost:8000/models
+
+# 단일 파일 STT (기본 모델)
+curl -X POST "http://localhost:8000/transcribe" \
+    -F "file=@audio.wav"
+
+# 단일 파일 STT (모델 지정)
+curl -X POST "http://localhost:8000/transcribe" \
+    -F "file=@audio.wav" \
+    -F "model=large-v3"
+
+# 2채널 대화 STT
+curl -X POST "http://localhost:8000/transcribe_conversation" \
+    -F "agent_file=@call-RX.wav" \
+    -F "customer_file=@call-TX.wav"
+
+# 2채널 대화 STT (모델 지정)
+curl -X POST "http://localhost:8000/transcribe_conversation" \
+    -F "agent_file=@call-RX.wav" \
+    -F "customer_file=@call-TX.wav" \
+    -F "model=large-v3"
+```
+
+#### 지원 모델
+
+| 모델 | 크기 | 속도 | 정확도 |
+|------|------|------|--------|
+| tiny | 39M | 가장 빠름 | 낮음 |
+| base | 74M | 빠름 | 보통 |
+| small | 244M | 보통 | 좋음 |
+| medium | 769M | 느림 | 매우 좋음 |
+| large-v2 | 1.5G | 가장 느림 | 우수 |
+| large-v3 | 1.5G | 가장 느림 | 최고 |
+
 ---
 
 ## 프로젝트 구조
@@ -224,6 +291,7 @@ python dashboard.py
 ```
 call-tegorizer/
 ├── main.py                 # 메인 배치 처리 스크립트
+├── stt_api.py              # STT REST API 서버 (FastAPI)
 ├── stt_operator.py         # STT 처리 모듈 (Whisper)
 ├── llm_operator.py         # LLM 분석 모듈 (LLaMA)
 ├── dashboard.py            # Gradio 웹 대시보드
