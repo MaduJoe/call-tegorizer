@@ -12,6 +12,8 @@ import time
 
 from faster_whisper import WhisperModel, BatchedInferencePipeline
 import torch
+import torchaudio
+from transformers import WhisperProcessor, WhisperForConditionalGeneration
 
 from config import get_config
 
@@ -21,11 +23,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 지원 모델 목록
-AVAILABLE_MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
+# 지원 모델 목록 (faster-whisper)
+AVAILABLE_MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3", "turbo"]
+
+# HuggingFace 모델 설정
+HF_MODEL_PREFIX = "hf:"
+HF_MODELS = {
+    "whisper-small-korean": "steja/whisper-small-korean"
+}
 
 # 모델 캐시 (메모리 관리)
-model_cache = {}
+model_cache = {}  # faster-whisper 모델 캐시
+hf_model_cache = {}  # HuggingFace 모델 캐시
 current_model_name = None
 
 
@@ -166,6 +175,132 @@ def _merge_by_timestamp(agent: dict, customer: dict) -> list:
     return sorted(segments, key=lambda x: x['start'])
 
 
+def _resolve_hf_model_id(model_name: str) -> str:
+    """HF 모델명을 실제 모델 ID로 변환"""
+    # hf: prefix 제거
+    if model_name.startswith(HF_MODEL_PREFIX):
+        model_name = model_name[len(HF_MODEL_PREFIX):]
+
+    # 단축 모델명이면 전체 경로로 변환
+    if model_name in HF_MODELS:
+        return HF_MODELS[model_name]
+
+    # 이미 전체 경로면 그대로 반환 (예: steja/whisper-small-korean)
+    return model_name
+
+
+def get_hf_model(model_id: str):
+    """HuggingFace transformers 모델 로드"""
+    global hf_model_cache
+
+    resolved_id = _resolve_hf_model_id(model_id)
+
+    # 이미 로드된 모델이면 반환
+    if resolved_id in hf_model_cache:
+        return hf_model_cache[resolved_id]
+
+    # 메모리 관리: 기존 HF 모델 언로드
+    if hf_model_cache:
+        print(f"Unloading previous HF model...")
+        hf_model_cache.clear()
+        torch.cuda.empty_cache()
+
+    print(f"Loading HuggingFace model: {resolved_id}...")
+    start = time.time()
+
+    config = get_config()
+    device = config.get('stt', {}).get('device', 'cuda')
+
+    processor = WhisperProcessor.from_pretrained(resolved_id)
+    model = WhisperForConditionalGeneration.from_pretrained(resolved_id)
+
+    use_cuda = device == 'cuda' and torch.cuda.is_available()
+    if use_cuda:
+        model = model.to('cuda').half()  # GPU에서 float16 사용
+    else:
+        model = model.float()  # CPU에서 float32 사용
+
+    print(f"HF Model loaded in {time.time() - start:.2f}s")
+
+    hf_model_cache[resolved_id] = {
+        'processor': processor,
+        'model': model,
+        'device': 'cuda' if use_cuda else 'cpu',
+        'dtype': torch.float16 if use_cuda else torch.float32
+    }
+
+    return hf_model_cache[resolved_id]
+
+
+def transcribe_audio_hf(audio_path: str, model_id: str) -> dict:
+    """HuggingFace 모델로 오디오 변환"""
+    import traceback
+
+    try:
+        hf_data = get_hf_model(model_id)
+        processor = hf_data['processor']
+        model = hf_data['model']
+        device = hf_data['device']
+        dtype = hf_data['dtype']
+
+        resolved_id = _resolve_hf_model_id(model_id)
+
+        # 오디오 로드 (16kHz로 리샘플링)
+        import soundfile as sf
+
+        audio_data, sample_rate = sf.read(audio_path)
+
+        # numpy array를 tensor로 변환
+        if len(audio_data.shape) == 1:
+            waveform = torch.from_numpy(audio_data).float().unsqueeze(0)
+        else:
+            waveform = torch.from_numpy(audio_data.T).float()
+
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+            waveform = resampler(waveform)
+
+        # 모노로 변환
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+
+        # 입력 처리
+        input_features = processor(
+            waveform.squeeze().numpy(),
+            sampling_rate=16000,
+            return_tensors="pt"
+        ).input_features
+
+        if device == 'cuda':
+            input_features = input_features.to('cuda', dtype=dtype)
+        else:
+            input_features = input_features.to(dtype=dtype)
+
+        # 음성 인식 (한국어 fine-tuned 모델이므로 별도 language 설정 불필요)
+        with torch.no_grad():
+            predicted_ids = model.generate(input_features)
+
+        transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)
+        text = transcription[0].strip() if transcription else ""
+
+        # hallucination 체크
+        if _is_hallucination(text):
+            text = ""
+
+        return {
+            "file": os.path.basename(audio_path),
+            "text": text,
+            "segments": [{"id": 0, "start": 0.0, "end": 0.0, "text": text}] if text else [],
+            "language": "ko",
+            "language_probability": 1.0,
+            "model": f"hf:{resolved_id}"
+        }
+    except Exception as e:
+        print(f"HF transcribe error: {e}")
+        traceback.print_exc()
+        raise
+
+
 @app.on_event("startup")
 async def load_default_model():
     """서버 시작 시 기본 모델 로딩"""
@@ -177,6 +312,7 @@ async def load_default_model():
 @app.get("/models")
 async def list_models():
     """사용 가능한 모델 목록"""
+    hf_loaded = list(hf_model_cache.keys())
     return {
         "available_models": AVAILABLE_MODELS,
         "current_model": current_model_name,
@@ -187,6 +323,12 @@ async def list_models():
             "medium": {"size": "769M", "speed": "slow", "accuracy": "very good"},
             "large-v2": {"size": "1.5G", "speed": "slowest", "accuracy": "excellent"},
             "large-v3": {"size": "1.5G", "speed": "slowest", "accuracy": "best"},
+            "turbo": {"size": "809M", "speed": "fast", "accuracy": "very good"},
+        },
+        "huggingface_models": {
+            "available": {f"hf:{k}": v for k, v in HF_MODELS.items()},
+            "loaded": hf_loaded,
+            "usage": "model=hf:whisper-small-korean 또는 model=hf:steja/whisper-small-korean"
         }
     }
 
@@ -194,24 +336,33 @@ async def list_models():
 @app.post("/transcribe")
 async def transcribe(
     file: UploadFile = File(...),
-    model: Optional[str] = Form(None, description="모델 선택: tiny, base, small, medium, large-v2, large-v3", examples=["medium"])
+    model: Optional[str] = Form(None, description="모델 선택: tiny, base, small, medium, large-v2, large-v3, hf:whisper-small-korean", examples=["medium", "hf:whisper-small-korean"])
 ):
     """
     단일 오디오 파일 STT 변환
 
-    # 기본 모델 사용
+    # 기본 모델 사용 (faster-whisper)
     curl -X POST "http://192.168.100.142:8000/transcribe" \
         -F "file=@audio.wav"
 
-    # 모델 지정
+    # faster-whisper 모델 지정
     curl -X POST "http://192.168.100.142:8000/transcribe" \
         -F "file=@audio.wav" \
         -F "model=large-v3"
+
+    # HuggingFace 모델 사용
+    curl -X POST "http://192.168.100.142:8000/transcribe" \
+        -F "file=@audio.wav" \
+        -F "model=hf:whisper-small-korean"
     """
     if not file.filename.endswith(('.wav', '.mp3', '.m4a', '.flac', '.ogg')):
         raise HTTPException(400, "지원하지 않는 파일 형식. wav, mp3, m4a, flac, ogg 지원")
 
-    if model and model not in AVAILABLE_MODELS:
+    # HuggingFace 모델 여부 확인
+    is_hf_model = model and model.startswith(HF_MODEL_PREFIX)
+
+    # faster-whisper 모델 검증 (HF 모델이 아닌 경우만)
+    if model and not is_hf_model and model not in AVAILABLE_MODELS:
         raise HTTPException(400, f"지원하지 않는 모델: {model}. 사용 가능: {AVAILABLE_MODELS}")
 
     suffix = os.path.splitext(file.filename)[1]
@@ -220,7 +371,10 @@ async def transcribe(
         tmp_path = tmp.name
 
     try:
-        result = transcribe_audio(tmp_path, model)
+        if is_hf_model:
+            result = transcribe_audio_hf(tmp_path, model)
+        else:
+            result = transcribe_audio(tmp_path, model)
         return JSONResponse(result)
     except Exception as e:
         raise HTTPException(500, f"STT 처리 실패: {str(e)}")
@@ -232,23 +386,33 @@ async def transcribe(
 async def transcribe_conversation(
     agent_file: UploadFile = File(..., description="상담사 음성 파일 (RX)"),
     customer_file: UploadFile = File(..., description="고객 음성 파일 (TX)"),
-    model: Optional[str] = Form(None, description="모델 선택: tiny, base, small, medium, large-v2, large-v3", examples=["medium"])
+    model: Optional[str] = Form(None, description="모델 선택: tiny, base, small, medium, large-v2, large-v3, hf:whisper-small-korean", examples=["medium", "hf:whisper-small-korean"])
 ):
     """
     상담사/고객 2채널 대화 STT 변환
 
-    # 기본 모델 사용
+    # 기본 모델 사용 (faster-whisper)
     curl -X POST "http://192.168.100.142:8000/transcribe_conversation" \
         -F "agent_file=@call-RX.wav" \
         -F "customer_file=@call-TX.wav"
 
-    # 모델 지정
+    # faster-whisper 모델 지정
     curl -X POST "http://192.168.100.142:8000/transcribe_conversation" \
         -F "agent_file=@call-RX.wav" \
         -F "customer_file=@call-TX.wav" \
         -F "model=large-v3"
+
+    # HuggingFace 모델 사용
+    curl -X POST "http://192.168.100.142:8000/transcribe_conversation" \
+        -F "agent_file=@call-RX.wav" \
+        -F "customer_file=@call-TX.wav" \
+        -F "model=hf:whisper-small-korean"
     """
-    if model and model not in AVAILABLE_MODELS:
+    # HuggingFace 모델 여부 확인
+    is_hf_model = model and model.startswith(HF_MODEL_PREFIX)
+
+    # faster-whisper 모델 검증 (HF 모델이 아닌 경우만)
+    if model and not is_hf_model and model not in AVAILABLE_MODELS:
         raise HTTPException(400, f"지원하지 않는 모델: {model}. 사용 가능: {AVAILABLE_MODELS}")
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_agent:
@@ -260,14 +424,20 @@ async def transcribe_conversation(
         customer_path = tmp_customer.name
 
     try:
-        agent_result = transcribe_audio(agent_path, model)
-        customer_result = transcribe_audio(customer_path, model)
+        if is_hf_model:
+            agent_result = transcribe_audio_hf(agent_path, model)
+            customer_result = transcribe_audio_hf(customer_path, model)
+            used_model = agent_result.get('model', model)
+        else:
+            agent_result = transcribe_audio(agent_path, model)
+            customer_result = transcribe_audio(customer_path, model)
+            used_model = current_model_name
 
         result = {
             'agent': agent_result,
             'customer': customer_result,
             'merged': _merge_by_timestamp(agent_result, customer_result),
-            'model': current_model_name
+            'model': used_model
         }
         return JSONResponse(result)
     except Exception as e:
@@ -283,7 +453,11 @@ async def health():
     return {
         "status": "ok",
         "current_model": current_model_name,
-        "available_models": AVAILABLE_MODELS
+        "available_models": AVAILABLE_MODELS,
+        "huggingface_models": {
+            "available": list(HF_MODELS.keys()),
+            "loaded": list(hf_model_cache.keys())
+        }
     }
 
 
